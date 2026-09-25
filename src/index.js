@@ -144,7 +144,7 @@ async function update(){
 
     if(selectedMode === "qr" && s.qr){
       el.className="";
-      el.innerHTML='<img class="qr" src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data='+encodeURIComponent(s.qr)+'&t='+Date.now()+'" alt="Código QR"><p>📱 WhatsApp → Dispositivos vinculados → Vincular un dispositivo.</p>';
+      el.innerHTML='<img class="qr" src="https://api.qrserver.com/v1/create-qr-code/?size=800x800&data='+encodeURIComponent(s.qr)+'&t='+Date.now()+'" alt="Código QR"><p>📱 WhatsApp → Dispositivos vinculados → Vincular un dispositivo.</p>';
       return;
     }
 
