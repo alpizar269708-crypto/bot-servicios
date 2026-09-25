@@ -41,6 +41,7 @@ let botConnected = false;
 let authState = null;
 let loginMode = null;
 let loginPhone = "";
+const botSentMessageIds = new Set();
 
 const app = express();
 app.use(express.urlencoded({ extended: true }));
@@ -579,32 +580,62 @@ async function debtors() {
 
 function menu() {
   return [
-    "📋 *MENÚ — BOT DE SERVICIOS*",
+    "📋 *MENÚ DE SERVICIOS*",
     "",
-    PREFIX + "activarbotservicios",
-    PREFIX + "menu",
-    PREFIX + "pag NOMBRE",
-    PREFIX + "transferencia NOMBRE IMPORTE",
-    PREFIX + "deudores",
-    PREFIX + "pagados",
-    PREFIX + "listaservicios",
-    PREFIX + "cuenta nueva MONTO",
-    PREFIX + "cerrar ciclo",
+    "🧾 *Registrar servicio*",
+    "   250 Juan",
+    "   Juan 250",
     "",
-    "💡 Servicio rápido: escribe el importe y el nombre en cualquier orden.",
-    "Ejemplos: 250 Juan / Juan 250",
+    "💵 *Registrar pago*",
+    "   pag Juan",
     "",
-    "🔄 Las transferencias se guardan pero NO cuentan en la suma.",
-    "👥 Los deudores permanecen hasta registrar su pago.",
-    "💾 El historial se conserva en MongoDB."
+    "🔄 *Registrar transferencia*",
+    "   transferencia Juan 500",
+    "",
+    "👥 *Consultar deudores*",
+    "   deudores",
+    "",
+    "✅ *Ver pagados*",
+    "   pagados",
+    "",
+    "📋 *Ver servicios*",
+    "   listaservicios",
+    "",
+    "🆕 *Nueva cuenta*",
+    "   cuenta nueva 5000",
+    "",
+    "🔒 *Cerrar ciclo*",
+    "   cerrar ciclo",
+    "",
+    "💡 Puedes escribir los comandos sin el signo !.",
+    "🔄 Las transferencias no se suman al total."
   ].join("\n");
 }
 
 async function send(jid, text) {
-  if (sock) await sock.sendMessage(jid, { text });
+  if (!sock) return null;
+
+  const result = await sock.sendMessage(jid, { text });
+
+  // Solo ignoramos los mensajes que ESTE BOT acaba de enviar.
+  // Así, si el dueño escribe manualmente desde el mismo número,
+  // ese mensaje sí puede ser procesado.
+  if (result?.key?.id) {
+    botSentMessageIds.add(result.key.id);
+
+    // Evita que el Set crezca indefinidamente.
+    setTimeout(() => botSentMessageIds.delete(result.key.id), 10 * 60 * 1000);
+  }
+
+  return result;
 }
 
 async function handleMessage(msg) {
+  // No procesar mensajes enviados por el propio bot.
+  // Los mensajes escritos manualmente por el usuario desde ese mismo
+  // número NO están en este Set y sí se procesan.
+  if (msg.key?.id && botSentMessageIds.has(msg.key.id)) return;
+
   const jid = msg.key.remoteJid;
   if (!jid) return;
 
@@ -693,7 +724,7 @@ async function handleMessage(msg) {
     args = args.split(/\s+/).slice(1).join(" ").trim();
 
     if (!args) {
-      await send(jid, "❌ Usa: " + PREFIX + "pag NOMBRE");
+      await send(jid, "❌ Usa: pag NOMBRE");
       return;
     }
 
@@ -722,7 +753,7 @@ async function handleMessage(msg) {
 
     const a = amountFrom(args);
     if (!a) {
-      await send(jid, "❌ Usa: " + PREFIX + "transferencia NOMBRE IMPORTE");
+      await send(jid, "❌ Usa: transferencia NOMBRE IMPORTE");
       return;
     }
 
@@ -925,7 +956,7 @@ async function start(mode = "qr", phone = "", onCodeReady = null) {
         }
 
         if (OWNER_PHONE) {
-          await send(OWNER_PHONE + "@s.whatsapp.net", "🤖 Bot de servicios conectado.\n\nEscribe " + PREFIX + "menu");
+          await send(OWNER_PHONE + "@s.whatsapp.net", "🤖 Bot de servicios conectado.\n\nEscribe: menu");
         }
       }
 
