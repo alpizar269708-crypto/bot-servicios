@@ -846,6 +846,77 @@ async function start(mode = "qr", phone = "") {
 
     if (mode === "phone" && !state.creds.me && phone) {
       setTimeout(async () => {
+        try {
+          requestedPairingPhone = phone;
+          const code = await generatePairingCode();
+          if (code) console.log("🔢 Código de vinculación listo para mostrar en el panel.");
+        } catch (e) {
+          console.error("❌ Error al generar código de vinculación:", e?.message || e);
+        }
+      }, 3000);
+    }
+
+    sock.ev.on("connection.update", async update => {
+      const connection = update.connection;
+
+      if (update.qr && loginMode === "qr") {
+        currentQR = update.qr;
+        currentPairingCode = null;
+        console.log("📱 QR generado — disponible únicamente en el panel web.");
+      }
+
+      if (connection === "open") {
+        starting = false;
+        botConnected = true;
+        currentQR = null;
+        currentPairingCode = null;
+        requestedPairingPhone = null;
+        pairingInProgress = false;
+        console.log("✅ WhatsApp conectado.");
+
+        if (OWNER_PHONE) {
+          await send(OWNER_PHONE + "@s.whatsapp.net", "🤖 Bot de servicios conectado.\n\nEscribe " + PREFIX + "menu");
+        }
+      }
+
+      if (connection === "close") {
+        starting = false;
+        botConnected = false;
+        sock = null;
+
+        const code = update.lastDisconnect?.error?.output?.statusCode;
+        console.log(`⚠️ WhatsApp desconectado (código ${code ?? "desconocido"}). Se reintentará.`);
+
+        if (code === DisconnectReason.loggedOut) {
+          currentQR = null;
+          currentPairingCode = null;
+          requestedPairingPhone = null;
+          console.log("🔴 WhatsApp reportó SESIÓN CERRADA (loggedOut). Las credenciales se conservan en MongoDB.");
+          return;
+        }
+
+        setTimeout(() => start(loginMode || "qr", loginPhone || ""), 3000);
+      }
+    });
+
+    sock.ev.on("messages.upsert", async event => {
+      for (const msg of event.messages) {
+        try {
+          await handleMessage(msg);
+        } catch (error) {
+          console.error("❌ Error procesando mensaje:", error?.message || error);
+        }
+      }
+    });
+  } catch (error) {
+    starting = false;
+    sock = null;
+    console.error("❌ Error iniciando WhatsApp:", error?.message || error);
+    setTimeout(() => start(loginMode || mode, loginPhone || phone), 5000);
+  }
+}
+
+(async () => {
   await mongo.connect();
   db = mongo.db(DB_NAME);
   await mongoose.connect(MONGO_URI);
