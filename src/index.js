@@ -827,11 +827,11 @@ async function handleMessage(msg) {
       ).join("\n");
 
       return (i + 1) + ". 👤 *" + g.name + "* — " + money(g.total) + "\n" + details;
-    }).join("\\n\\n");
+    }).join("\n\n");
 
     await send(jid,
-      "👥 *DEUDORES*\\n\\n" + body +
-      "\\n\\n💰 Total pendiente: *" + money(total) + "*"
+      "👥 *DEUDORES*\n\n" + body +
+      "\n\n💰 Total pendiente: *" + money(total) + "*"
     );
     return;
   }
