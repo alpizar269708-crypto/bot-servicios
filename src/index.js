@@ -297,7 +297,7 @@ function fuzzyWord(word, accepted, maxDistance = 1) {
 function fuzzyPhrase(words, acceptedPhrases) {
   return acceptedPhrases.some(phrase => {
     const p = phrase.split(" ");
-    if (p.length !== words.length) return false;
+    if (words.length < p.length) return false;
     return p.every((part, i) => fuzzyWord(words[i], [part], part.length <= 3 ? 1 : 2));
   });
 }
@@ -333,7 +333,8 @@ function commandOf(text) {
   if (words.some(isPaymentWord)) return "pag";
   if (words.some(isTransferWord)) return "transferencia";
   if (fuzzyPhrase(words, ["cuenta nueva"]) || fuzzyWord(joined, ["cuentanueva"], 2)) return "cuenta_nueva";
-  if (fuzzyPhrase(words, ["cerrar ciclo"])) return "cerrar_ciclo";
+  if (fuzzyPhrase(words, ["corte"])) return "corte";
+  if (fuzzyPhrase(words, ["cerrar ciclo"])) return "corte";
   if (isRetiroWord(words[0])) return "retiro";
 
   return null;
@@ -695,7 +696,7 @@ async function pay(name) {
 async function debtors() {
   const { services } = await collections();
   return services.aggregate([
-    { $match: { status: "pending" } },
+    { $match: { status: "pending", personName: { $not: /^retiro$/i } } },
     {
       $group: {
         _id: "$personId",
@@ -740,8 +741,8 @@ function menu() {
     "🆕 *CUENTA NUEVA*",
     "cuenta nueva 5000",
     "",
-    "🔒 *CERRAR CICLO*",
-    "cerrar ciclo"
+    "✂️ *CORTE*",
+    "corte"
   ].join("\n");
 }
 async function send(jid, text) {
@@ -792,7 +793,7 @@ async function handleMessage(msg) {
 
   if (command === "deudores") {
     const { services } = await collections();
-    const rows = await services.find({ status: "pending" }).sort({ createdAt: 1 }).toArray();
+    const rows = await services.find({ status: "pending", personName: { $not: /^retiro$/i } }).sort({ createdAt: 1 }).toArray();
 
     if (!rows.length) {
       await send(jid, "✅ No hay deudores pendientes.");
@@ -825,7 +826,7 @@ async function handleMessage(msg) {
         }) + " — " + money(x.amount)
       ).join("\n");
 
-      return (i + 1) + ". 👤 *" + g.name + "* — " + money(g.total) + "\\n" + details;
+      return (i + 1) + ". 👤 *" + g.name + "* — " + money(g.total) + "\n" + details;
     }).join("\\n\\n");
 
     await send(jid,
@@ -903,8 +904,8 @@ async function handleMessage(msg) {
 
     await send(jid,
       "✅ *PAGO REGISTRADO*\n" +
-      "👤 " + result.person.name + "\\n" +
-      "💵 " + money(result.total) + "\\n" +
+      "👤 " + result.person.name + "\n" +
+      "💵 " + money(result.total) + "\n" +
       "🧾 " + result.count + " servicio" + (result.count === 1 ? "" : "s")
     );
     return;
@@ -1009,7 +1010,7 @@ async function handleMessage(msg) {
     return;
   }
 
-  if (command === "cerrar_ciclo") {
+  if (command === "corte") {
     const s = await servicesSummary();
     const { accounts, cycles } = await collections();
     const closedAt = new Date();
@@ -1037,7 +1038,7 @@ async function handleMessage(msg) {
     );
 
     await send(jid,
-      "🔒 *CICLO CERRADO*\n\n" +
+      "✂️ *CORTE*\n\n" +
       "📋 Servicios: *" + s.rows.length + "*\n" +
       "💰 Suma: *" + money(s.total) + "*\n" +
       "💸 Retiros: *" + money(s.withdrawnTotal) + "*\n" +
