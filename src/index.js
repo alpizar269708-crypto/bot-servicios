@@ -1051,7 +1051,16 @@ async function handleMessage(msg) {
   const raw = text.replace(/^!/, "").trim();
   const a = amountFrom(raw);
 
+  // Nunca registrar como servicio una palabra que parezca un comando.
+  // Esto evita que faltas como "retior 1" terminen creando un deudor llamado "retior".
   if (a) {
+    const firstWord = norm(raw.split(/\s+/)[0] || "");
+    const looksLikeCommand =
+      fuzzyWord(firstWord, ["retiro", "retirar", "ret", "r"], 1) ||
+      fuzzyWord(firstWord, ["transferencia", "transfer", "transf", "trans"], 2) ||
+      fuzzyWord(firstWord, ["p", "pa", "pag", "pago", "pagado", "pagar", "paf"], 1);
+
+    if (looksLikeCommand) return;
     const name = cleanName(raw, a.raw);
     if (name.length >= 2) {
       const transfer = /\b(transferencia|transfer|transf)\b/i.test(raw);
