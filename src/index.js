@@ -1224,19 +1224,12 @@ async function handleMessage(msg) {
       }
     );
 
-    const byAmount = new Map();
-
-    for (const x of s.rows) {
-      const amount = Number(x.amount || 0);
-      if (!byAmount.has(amount)) byAmount.set(amount, 0);
-      byAmount.set(amount, byAmount.get(amount) + 1);
-    }
-
-    const serviceLines = [...byAmount.entries()]
-      .sort((a, b) => b[0] - a[0])
-      .map(([amount, count]) =>
-        money(amount) + "*" + count + "=" + money(amount * count)
-      )
+    const serviceAmounts = [250, 35, 300];
+    const serviceLines = serviceAmounts
+      .map(amount => {
+        const count = s.rows.filter(x => Number(x.amount) === amount).length;
+        return money(amount) + "*" + count + "=" + money(amount * count);
+      })
       .join("\n");
 
     await send(jid,
