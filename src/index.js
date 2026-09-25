@@ -33,6 +33,8 @@ let sock;
 let starting = false;
 let currentQR = null;
 let currentPairingCode = null;
+let requestedPairingPhone = null;
+let pairingInProgress = false;
 let botConnected = false;
 
 const app = express();
@@ -68,12 +70,17 @@ app.get("/pairing", async (req, res) => {
   }
 
   try {
-    const code = await sock.requestPairingCode(phone);
-    currentPairingCode = code;
-    currentQR = null;
-    console.log("🔐 Código de vinculación generado desde el panel.");
+    requestedPairingPhone = phone;
+    currentPairingCode = null;
+
+    if (!currentQR) {
+      return res.json({ ok: true, waiting: true, message: "WhatsApp está preparando la vinculación. El código aparecerá en unos segundos." });
+    }
+
+    const code = await generatePairingCode();
     return res.json({ ok: true, pairingCode: code });
   } catch (error) {
+    requestedPairingPhone = null;
     console.error("❌ No se pudo generar el código:", error?.message || error);
     return res.status(500).json({ ok: false, error: error?.message || String(error) });
   }
@@ -164,6 +171,21 @@ update();setInterval(update,5000);
 });
 
 app.listen(Number(PORT), "0.0.0.0", () => console.log(`🌐 Panel listo en puerto ${PORT}`));
+
+async function generatePairingCode() {
+  if (!sock || !requestedPairingPhone || pairingInProgress) return null;
+
+  pairingInProgress = true;
+  try {
+    const code = await sock.requestPairingCode(requestedPairingPhone);
+    currentPairingCode = code;
+    currentQR = null;
+    console.log("🔐 Código de vinculación generado desde el panel.");
+    return code;
+  } finally {
+    pairingInProgress = false;
+  }
+}
 
 function cleanPhone(v) {
   return String(v || "").replace(/\D/g, "");
@@ -775,6 +797,8 @@ async function resetWhatsAppAuth() {
   await auth.deleteMany({});
   currentQR = null;
   currentPairingCode = null;
+  requestedPairingPhone = null;
+  pairingInProgress = false;
   botConnected = false;
   console.log("🧹 Sesión de WhatsApp inválida eliminada.");
 }
@@ -804,8 +828,15 @@ async function start() {
 
       if (update.qr) {
         currentQR = update.qr;
-        currentPairingCode = null;
         console.log("📱 QR generado — disponible únicamente en el panel web.");
+
+        if (requestedPairingPhone && !currentPairingCode && !pairingInProgress) {
+          try {
+            await generatePairingCode();
+          } catch (error) {
+            console.error("❌ No se pudo generar el código de vinculación:", error?.message || error);
+          }
+        }
       }
 
       if (connection === "open") {
@@ -813,6 +844,8 @@ async function start() {
         botConnected = true;
         currentQR = null;
         currentPairingCode = null;
+        requestedPairingPhone = null;
+        pairingInProgress = false;
         console.log("✅ WhatsApp conectado.");
 
         if (OWNER_PHONE) {
