@@ -287,9 +287,26 @@ function commandOf(text) {
   if (t === "cuenta nueva" || t.startsWith("cuenta nueva ")) return "cuenta_nueva";
   if (t === "cuentanueva" || t.startsWith("cuentanueva ")) return "cuenta_nueva";
   if (t === "cerrar ciclo" || t.startsWith("cerrar ciclo ")) return "cerrar_ciclo";
-  if (t === "cerrarciclo" || t.startsWith("cerrarciclo ")) return "cerrar_ciclo";
 
   return null;
+}
+
+function quotedText(msg) {
+  const q =
+    msg.message?.extendedTextMessage?.contextInfo?.quotedMessage ||
+    msg.message?.imageMessage?.contextInfo?.quotedMessage ||
+    msg.message?.videoMessage?.contextInfo?.quotedMessage ||
+    null;
+
+  if (!q) return "";
+
+  return (
+    q.conversation ||
+    q.extendedTextMessage?.text ||
+    q.imageMessage?.caption ||
+    q.videoMessage?.caption ||
+    ""
+  ).trim();
 }
 
 function isOwner(jid) {
@@ -649,10 +666,11 @@ async function handleMessage(msg) {
   if (!text) return;
 
   const command = commandOf(text);
+  const quoted = quotedText(msg);
 
   if (command === "activar" || command === "menu") {
     await send(jid, command === "activar"
-      ? "🤖 *Bot de servicios activado.*\n\n" + menu()
+      ? "🤖 *BOT ACTIVADO*\n" + menu()
       : menu());
     return;
   }
@@ -723,8 +741,11 @@ async function handleMessage(msg) {
     if (args.startsWith(PREFIX)) args = args.slice(PREFIX.length).trim();
     args = args.split(/\s+/).slice(1).join(" ").trim();
 
+    // Si se respondió/citó un mensaje con "pag", usa el texto citado.
+    if (!args && quoted) args = quoted.replace(/^!/, "").trim();
+
     if (!args) {
-      await send(jid, "❌ Usa: pag NOMBRE");
+      await send(jid, "❌ Escribe: pag Fulano o responde a un mensaje y escribe pag.");
       return;
     }
 
@@ -738,10 +759,10 @@ async function handleMessage(msg) {
     }
 
     await send(jid,
-      "✅ *PAGO REGISTRADO*\n\n" +
+      "✅ *PAGO REGISTRADO*\n" +
       "👤 " + result.person.name + "\n" +
-      "💵 Total: *" + money(result.total) + "*\n" +
-      "🧾 Servicios liquidados: *" + result.count + "*"
+      "💵 " + money(result.total) + "\n" +
+      "🧾 " + result.count + " servicio" + (result.count === 1 ? "" : "s") + " liquidado" + (result.count === 1 ? "" : "s")
     );
     return;
   }
@@ -749,26 +770,31 @@ async function handleMessage(msg) {
   if (command === "transferencia") {
     let args = text.trim();
     if (args.startsWith(PREFIX)) args = args.slice(PREFIX.length).trim();
+
+    // Permite dos formas:
+    // 1) "transferencia Fulano 250"
+    // 2) Responder a "Fulano 250" y escribir solo "transferencia"
     args = args.split(/\s+/).slice(1).join(" ").trim();
+    if (!args && quoted) args = quoted.replace(/^!/, "").trim();
 
     const a = amountFrom(args);
     if (!a) {
-      await send(jid, "❌ Usa: transferencia NOMBRE IMPORTE");
+      await send(jid, "❌ Escribe: transferencia Fulano 250 o responde al mensaje de Fulano 250 y escribe transferencia.");
       return;
     }
 
     const name = cleanName(args, a.raw);
     if (!name) {
-      await send(jid, "❌ Falta el nombre.");
+      await send(jid, "❌ No pude identificar el nombre.");
       return;
     }
 
     await addService(name, a.amount, jid, true);
     await send(jid,
-      "🔄 *TRANSFERENCIA REGISTRADA*\n\n" +
+      "🔄 *TRANSFERENCIA*\n" +
       "👤 " + name + "\n" +
       "💵 " + money(a.amount) + "\n" +
-      "🚫 No se suma al total de servicios."
+      "🚫 No se suma al total."
     );
     return;
   }
@@ -844,12 +870,15 @@ async function handleMessage(msg) {
 
       if (type === "transfer") {
         await send(jid,
-          "🔄 Transferencia registrada: *" + name + "* — *" +
-          money(a.amount) + "*\n🚫 No se suma al total.");
+          "🔄 *TRANSFERENCIA*\n" +
+          "👤 " + name + "\n" +
+          "💵 " + money(a.amount) + "\n" +
+          "🚫 No se suma al total.");
       } else {
         await send(jid,
-          "🧾 Servicio registrado: *" + name + "* — *" +
-          money(a.amount) + "*");
+          "🧾 *SERVICIO REGISTRADO*\n" +
+          "👤 " + name + "\n" +
+          "💵 " + money(a.amount));
       }
     }
   }
