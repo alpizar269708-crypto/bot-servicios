@@ -328,8 +328,8 @@ function commandOf(text) {
   if (fuzzyWord(joined, ["menu", "ayuda"], 2)) return "menu";
   if (fuzzyWord(joined, ["activarbotservicios", "activarbotaqui"], 2)) return "activar";
   if (fuzzyWord(joined, ["desactivarbotservicios", "desactivarbotaqui"], 2)) return "desactivar";
-  if (fuzzyWord(joined, ["deudoresp", "deudorp", "pagarmultiples", "pagarmultiple"], 2)) return "deudoresp";
-  if (fuzzyWord(joined, ["deudores", "deudor"], 2)) return "deudores";
+  if (fuzzyWord(joined, ["deudores", "deudor"], 1)) return "deudores";
+  if (fuzzyWord(joined, ["deudoresp"], 1)) return "deudoresp";
   if (fuzzyWord(joined, ["pagados", "pagado"], 2)) return "pagados";
   if (fuzzyWord(joined, ["listaservicios"], 2) || fuzzyPhrase(words, ["lista servicios", "lista servicio"])) return "listaservicios";
   if (words.some(isPaymentWord)) return "pag";
