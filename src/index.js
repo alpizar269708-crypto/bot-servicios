@@ -933,9 +933,27 @@ async function handleMessage(msg) {
   }
 
   if (command === "deudoresp") {
-    const numbers = [...text.matchAll(/\d+/g)]
-      .map(m => Number(m[0]))
-      .filter(n => n > 0);
+    const numbers = [];
+    const argsText = text
+      .replace(/\bdeudoresp\b/i, "")
+      .trim();
+
+    for (const part of argsText.split(/\s+/).filter(Boolean)) {
+      const range = part.match(/^(\d+)\s*-\s*(\d+)$/);
+
+      if (range) {
+        const from = Number(range[1]);
+        const to = Number(range[2]);
+        const step = from <= to ? 1 : -1;
+
+        for (let n = from; step > 0 ? n <= to : n >= to; n += step) {
+          if (n > 0) numbers.push(n);
+        }
+      } else {
+        const n = Number(part);
+        if (Number.isInteger(n) && n > 0) numbers.push(n);
+      }
+    }
 
     const uniqueNumbers = [...new Set(numbers)];
 
