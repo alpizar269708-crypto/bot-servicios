@@ -54,46 +54,6 @@ function panelStatus() {
   };
 }
 
-app.get("/", (req, res) => {
-  res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-  if (botConnected) return res.send("<div style=\"font-family:Arial;text-align:center;margin-top:50px\"><h2>🤖 Bot de WhatsApp activo</h2><p>El bot ya está vinculado y trabajando en el servidor.</p></div>");
-  res.send([
-    "<!doctype html>",
-    "<html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Vincular Bot</title></head>",
-    "<body style=\"font-family:Arial;padding:20px;max-width:600px;margin:auto;text-align:center\">",
-    "<h2>🔌 Vincular Bot de WhatsApp</h2>",
-    "<form action=\"/iniciar\" method=\"POST\" style=\"text-align:left;background:#f9f9f9;padding:20px;border-radius:10px;border:1px solid #ddd\">",
-    "<p><b>1. Elige el método de inicio de sesión:</b></p>",
-    "<label><input type=\"radio\" name=\"metodo\" value=\"1\" checked> 📱 Código QR</label><br><br>",
-    "<label><input type=\"radio\" name=\"metodo\" value=\"2\"> 🔢 Código de 8 dígitos</label><br><br>",
-    "<p><b>2. Si elegiste 8 dígitos, ingresa tu número (código país + número, ej. 525512345678):</b></p>",
-    "<input type=\"text\" name=\"numero\" inputmode=\"numeric\" autocomplete=\"tel\" placeholder=\"Ej: 525512345678\" style=\"padding:10px;width:100%;box-sizing:border-box;border-radius:5px;border:1px solid #ccc\"><br><br>",
-    "<button type=\"submit\" style=\"padding:12px 20px;background:#25D366;color:white;border:none;cursor:pointer;font-size:16px;border-radius:5px;width:100%\">Generar Código</button>",
-    "</form></body></html>"
-  ].join(""));
-});
-
-app.post("/iniciar", (req, res) => {
-  if (botConnected || starting || sock) return res.send("<h2 style=\"font-family:Arial;text-align:center;margin-top:50px\">El bot ya está arrancando o ya está vinculado.</h2>");
-  const metodo = req.body.metodo;
-  const numero = req.body.numero ? String(req.body.numero).replace(/[^0-9]/g, "") : "";
-  loginMode = metodo === "2" ? "phone" : "qr";
-  loginPhone = numero;
-  start(loginMode, loginPhone, htmlRespuesta => res.send(htmlRespuesta));
-});
-
-app.get("/status", (req, res) => {
-  res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-  res.json(panelStatus());
-});
-function panelStatus() {
-  return {
-    connected: botConnected,
-    qr: currentQR,
-    pairingCode: currentPairingCode
-  };
-}
-
 app.get("/status", (req, res) => {
   res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
   res.json(panelStatus());
@@ -143,88 +103,43 @@ app.get("/qr", async (req, res) => {
   }
 });
 
-app.get("/", (req, res) => {
-  res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-  res.send(`<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="cache-control" content="no-cache"><title>Bot de Servicios</title><style>body{font-family:Arial,sans-serif;text-align:center;background:#f5f5f5;margin:0;padding:30px;color:#222}.card{max-width:650px;margin:auto;background:#fff;padding:28px;border-radius:16px;box-shadow:0 4px 18px rgba(0,0,0,.12)}h1{font-size:28px}.qr{width:min(500px,90vw);height:auto;border:1px solid #ddd;border-radius:12px;padding:10px;background:#fff}.ok{font-size:22px;padding:35px;color:#16803c}.wait{font-size:20px;padding:45px}.code{font-size:34px;font-weight:bold;letter-spacing:6px;padding:25px;background:#f0f0f0;border-radius:12px;margin:20px 0}.buttons{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:20px 0}.btn{border:0;border-radius:10px;padding:14px 18px;font-size:16px;cursor:pointer;background:#222;color:#fff}.btn:hover{opacity:.85}small{color:#777}</style></head><body><div class="card"><h1>🔌 Bot de Servicios</h1><h2>Vinculación de WhatsApp</h2><p>Elige cómo quieres vincular el bot.</p><div class="buttons"><button class="btn" onclick="showQR()">📱 Vincular con QR</button><button class="btn" onclick="showPhone()">🔐 Vincular con número de teléfono</button></div><div id="phoneBox" style="display:none;margin:20px 0"><input id="phoneInput" inputmode="numeric" autocomplete="tel" placeholder="521XXXXXXXXXX" style="width:min(360px,90%);padding:14px;border:1px solid #ccc;border-radius:10px;font-size:18px;text-align:center"><button class="btn" onclick="generatePairing()">Generar código</button><p><small>Escribe el número con código de país, solo números. Ejemplo para México: 521XXXXXXXXXX.</small></p></div><div id="status" class="wait">👆 Elige una opción para vincular WhatsApp.</div></div><script>
-let selectedMode = null;
-
-async function showQR(){
-  selectedMode = "qr";
-  document.getElementById("phoneBox").style.display = "none";
-  const el = document.getElementById("status");
-  el.className = "wait";
-  el.innerHTML = "⏳ Preparando vinculación por QR...";
-  await fetch("/qr?_="+Date.now(),{cache:"no-store"}); await update();
-}
-
-function showPhone(){
-  selectedMode = "phone";
-  document.getElementById("phoneBox").style.display = "block";
-  document.getElementById("phoneInput").focus();
-  const el = document.getElementById("status");
-  el.className = "wait";
-  el.innerHTML = "📞 Escribe el número que quieres vincular y genera el código.";
-}
-
-async function generatePairing(){
-  selectedMode = "phone";
-  const phone = document.getElementById("phoneInput").value.replace(/\D/g,"");
-  const el = document.getElementById("status");
-  if(phone.length < 10){
-    el.className = "wait";
-    el.innerHTML = "❌ Escribe un número válido con código de país.";
-    return;
+app.get("/", async (req, res) => {
+  if (botConnected) {
+    return res.send(`
+      <div style="font-family: Arial; text-align: center; margin-top: 50px;">
+        <h2>🤖 Bot de WhatsApp activo</h2>
+        <p>El bot ya está vinculado y trabajando en el servidor.</p>
+      </div>
+    `);
   }
-  el.className = "wait";
-  el.innerHTML = "⏳ Generando código de vinculación...";
-  try{
-    const r = await fetch("/pairing?phone="+encodeURIComponent(phone)+"&_="+Date.now(), {cache:"no-store"});
-    const data = await r.json();
-    if(!data.ok){
-      el.className = "wait";
-      el.innerHTML = "❌ " + (data.error || "No se pudo generar el código.");
-      return;
-    }
-    await update();
-  }catch(e){
-    el.className = "wait";
-    el.innerHTML = "❌ No se pudo contactar al bot.";
+  const html = `
+    <html>
+    <head><title>Vincular Bot</title><meta charset="utf-8"></head>
+    <body style="font-family: Arial; padding: 20px; max-width: 600px; margin: auto; text-align: center;">
+        <h2>🔌 Vincular Bot de WhatsApp</h2>
+        <form action="/iniciar" method="POST" style="text-align: left; background: #f9f9f9; padding: 20px; border-radius: 10px; border: 1px solid #ddd;">
+            <p><b>1. Elige el método de inicio de sesión:</b></p>
+            <label><input type="radio" name="metodo" value="1" checked> 📱 Código QR</label><br><br>
+            <label><input type="radio" name="metodo" value="2"> 🔢 Código de 8 dígitos</label><br><br>
+            <p><b>2. Si elegiste 8 dígitos, ingresa tu número (código país + número, ej. 525512345678):</b></p>
+            <input type="text" name="numero" placeholder="Ej: 525512345678" style="padding: 10px; width: 100%; box-sizing: border-box; border-radius: 5px; border: 1px solid #ccc;"><br><br>
+            <button type="submit" style="padding: 12px 20px; background: #25D366; color: white; border: none; cursor: pointer; font-size: 16px; border-radius: 5px; width: 100%;">Generar Código</button>
+        </form>
+    </body>
+    </html>
+  `;
+  res.send(html);
+});
+
+app.post("/iniciar", (req, res) => {
+  if (botConnected || starting || sock) {
+    return res.send('<h2 style="font-family: Arial; text-align: center; margin-top: 50px;">El bot ya está arrancando.</h2>');
   }
-}
-
-async function update(){
-  try{
-    const r=await fetch("/status?_"+Date.now(),{cache:"no-store"});
-    const s=await r.json();
-    const el=document.getElementById("status");
-    if(s.connected){el.className="ok";el.innerHTML="✅ Bot vinculado correctamente y en línea.";return;}
-
-    if(selectedMode === "qr" && s.qr){
-      el.className="";
-      el.innerHTML='<img class="qr" src="https://api.qrserver.com/v1/create-qr-code/?size=800x800&data='+encodeURIComponent(s.qr)+'&t='+Date.now()+'" alt="Código QR"><p>📱 WhatsApp → Dispositivos vinculados → Vincular un dispositivo.</p>';
-      return;
-    }
-
-    if(selectedMode === "phone" && s.pairingCode){
-      el.className="";
-      el.innerHTML='<p>🔐 Código de vinculación</p><div class="code">'+s.pairingCode+'</div><p>En WhatsApp: Dispositivos vinculados → Vincular un dispositivo → Vincular con número de teléfono.</p>';
-      return;
-    }
-
-    if(!selectedMode){
-      el.className="wait";
-      el.innerHTML="👆 Elige una opción para vincular WhatsApp.";
-      return;
-    }
-
-    el.className="wait";
-    el.innerHTML=selectedMode === "qr"
-      ? "⏳ Esperando a que WhatsApp genere el QR..."
-      : "⏳ Esperando a que WhatsApp genere el código...";
-  }catch(e){document.getElementById("status").innerHTML="⚠️ Panel esperando al bot...";}
-}
-update();setInterval(update,120000);
-</script></body></html>`);
+  const { metodo, numero } = req.body;
+  const numeroLimpio = numero ? String(numero).replace(/[^0-9]/g, "") : "";
+  loginMode = metodo === "2" ? "phone" : "qr";
+  loginPhone = numeroLimpio;
+  start(loginMode, loginPhone, htmlRespuesta => res.send(htmlRespuesta));
 });
 
 app.listen(Number(PORT), "0.0.0.0", () => console.log(`🌐 Panel listo en puerto ${PORT}`));
@@ -861,47 +776,149 @@ async function resetWhatsAppAuth() {
 }
 
 async function start(mode = "qr", phone = "", onCodeReady = null) {
-  if (starting || sock || botConnected) return;
+  if (starting || sock) return;
   starting = true;
   loginMode = mode;
   loginPhone = phone;
-  currentQR = null;
-  currentPairingCode = null;
 
   try {
     if (!authState) authState = await useMongoDBAuthState("sesion");
     const { state, saveCreds } = authState;
+    const latest = await fetchLatestBaileysVersion();
 
-    // Flujo de inicio copiado del bot-completobeto.
     sock = makeWASocket({
+      version: latest.version,
+      logger,
       auth: state,
-      printQRInTerminal: false,
-      logger: pino({ level: "silent" }),
       browser: Browsers.ubuntu("Chrome"),
       syncFullHistory: false,
       generateHighQualityLinkPreview: false,
       markOnlineOnConnect: true,
+      printQRInTerminal: false,
       getMessage: async () => ({ conversation: "" })
     });
 
-    sock.ev.on("creds.update", saveC(async () => {
-  try {
-    await mongo.connect();
-    db = mongo.db(DB_NAME);
-    await mongoose.connect(MONGO_URI);
-    authState = await useMongoDBAuthState("sesion");
-    await ensureIndexes();
-    await ensureAccount();
-    console.log("✅ MongoDB conectado.");
-    if (authState.state.creds.me) {
-      console.log("✅ Sesión previa detectada. Arrancando bot automáticamente...");
-      await start("qr", "");
-    } else {
-      console.log("⚠️ No hay sesión. Entra a la página web para vincular el bot.");
+    sock.ev.on("creds.update", saveCreds);
+
+    if (mode === "phone" && !state.creds.me && phone) {
+      setTimeout(async () => {
+        try {
+          requestedPairingPhone = phone;
+          const code = await generatePairingCode();
+          if (code) {
+            console.log("🔢 Código de vinculación generado.");
+            if (onCodeReady) {
+              const codigoFormat = code?.match(/.{1,4}/g)?.join("-") || code;
+              onCodeReady(`
+                <div style="font-family: Arial; text-align: center; margin-top: 50px;">
+                  <h2>🔢 Tu código de vinculación es:</h2>
+                  <h1 style="font-size: 48px; letter-spacing: 5px; color: #25D366; background: #eee; display: inline-block; padding: 10px 20px; border-radius: 10px;">${codigoFormat}</h1>
+                  <p>Abre WhatsApp en tu teléfono, ve a <b>Dispositivos Vinculados &gt; Vincular con número de teléfono</b>, e ingresa este código.</p>
+                </div>
+              `);
+              onCodeReady = null;
+            }
+          }
+        } catch (e) {
+          console.error("❌ Error al generar código de vinculación:", e?.message || e);
+        }
+      }, 3000);
     }
-    app.listen(PORT, "0.0.0.0", () => console.log("🌐 Servidor Web interactivo escuchando en el puerto " + PORT));
+
+    sock.ev.on("connection.update", async update => {
+      const connection = update.connection;
+
+      if (update.qr && loginMode === "qr") {
+        currentQR = update.qr;
+        currentPairingCode = null;
+        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(update.qr)}`;
+        if (onCodeReady) {
+          onCodeReady(`
+            <div style="font-family: Arial; text-align: center; margin-top: 50px;">
+              <h2>📱 Escanea este código QR</h2>
+              <img src="${qrUrl}" alt="QR Code" style="border: 1px solid #ccc; border-radius: 10px; padding: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" />
+              <p>Abre WhatsApp &gt; Dispositivos Vinculados &gt; Vincular un dispositivo.</p>
+            </div>
+          `);
+          onCodeReady = null;
+        }
+        console.log("📱 QR generado — disponible únicamente en la página.");
+      }
+
+      if (connection === "open") {
+        starting = false;
+        botConnected = true;
+        currentQR = null;
+        currentPairingCode = null;
+        requestedPairingPhone = null;
+        pairingInProgress = false;
+        console.log("✅ WhatsApp conectado.");
+
+        if (onCodeReady) {
+          onCodeReady(`
+            <div style="font-family: Arial; text-align: center; margin-top: 50px;">
+              <h2 style="color: #25D366;">✅ ¡Bot vinculado correctamente!</h2>
+              <p>El bot ya está en línea y listo para trabajar.</p>
+            </div>
+          `);
+          onCodeReady = null;
+        }
+
+        if (OWNER_PHONE) {
+          await send(OWNER_PHONE + "@s.whatsapp.net", "🤖 Bot de servicios conectado.\n\nEscribe " + PREFIX + "menu");
+        }
+      }
+
+      if (connection === "close") {
+        starting = false;
+        botConnected = false;
+        sock = null;
+
+        const code = update.lastDisconnect?.error?.output?.statusCode;
+        console.log(`⚠️ WhatsApp desconectado (código ${code ?? "desconocido"}). Se reintentará.`);
+
+        if (code === DisconnectReason.loggedOut) {
+          currentQR = null;
+          currentPairingCode = null;
+          requestedPairingPhone = null;
+          console.log("🔴 WhatsApp reportó SESIÓN CERRADA (loggedOut). Las credenciales se conservan en MongoDB.");
+          return;
+        }
+
+        setTimeout(() => start(loginMode || "qr", loginPhone || ""), 3000);
+      }
+    });
+
+    sock.ev.on("messages.upsert", async event => {
+      for (const msg of event.messages) {
+        try {
+          await handleMessage(msg);
+        } catch (error) {
+          console.error("❌ Error procesando mensaje:", error?.message || error);
+        }
+      }
+    });
   } catch (error) {
-    console.error("❌ Error inicializando el bot:", error?.message || error);
-    process.exit(1);
+    starting = false;
+    sock = null;
+    console.error("❌ Error iniciando WhatsApp:", error?.message || error);
+    setTimeout(() => start(loginMode || mode, loginPhone || phone), 5000);
   }
-})();;
+}
+
+(async () => {
+  await mongo.connect();
+  db = mongo.db(DB_NAME);
+  await mongoose.connect(MONGO_URI);
+  authState = await useMongoDBAuthState("sesion");
+  await ensureIndexes();
+  await ensureAccount();
+  logger.info("MongoDB conectado.");
+
+  if (authState.state.creds.me) {
+    console.log("✅ Sesión previa detectada. Arrancando bot automáticamente...");
+    await start("qr", "");
+  } else {
+    console.log("⚠️ No hay sesión de WhatsApp. Entra al panel web para vincular el bot.");
+  }
+})();
