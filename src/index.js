@@ -84,23 +84,25 @@ function commandOf(text) {
   let t = norm(text);
   if (t.startsWith(PREFIX)) t = t.slice(PREFIX.length).trim();
 
-  const map = {
+  const exact = {
     menu: "menu",
     ayuda: "menu",
     activarbotservicios: "activar",
-    pag: "pag",
-    pago: "pag",
-    transferencia: "transferencia",
     deudores: "deudores",
     pagados: "pagados",
-    listaservicios: "listaservicios",
-    "cuenta nueva": "cuenta_nueva",
-    cuentanueva: "cuenta_nueva",
-    "cerrar ciclo": "cerrar_ciclo",
-    cerrarciclo: "cerrar_ciclo"
+    listaservicios: "listaservicios"
   };
 
-  return map[t] || null;
+  if (exact[t]) return exact[t];
+  if (t === "pag" || t.startsWith("pag ")) return "pag";
+  if (t === "pago" || t.startsWith("pago ")) return "pag";
+  if (t === "transferencia" || t.startsWith("transferencia ")) return "transferencia";
+  if (t === "cuenta nueva" || t.startsWith("cuenta nueva ")) return "cuenta_nueva";
+  if (t === "cuentanueva" || t.startsWith("cuentanueva ")) return "cuenta_nueva";
+  if (t === "cerrar ciclo" || t.startsWith("cerrar ciclo ")) return "cerrar_ciclo";
+  if (t === "cerrarciclo" || t.startsWith("cerrarciclo ")) return "cerrar_ciclo";
+
+  return null;
 }
 
 function isOwner(jid) {
