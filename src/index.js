@@ -86,6 +86,7 @@ let selectedMode = null;
 
 async function showQR(){
   selectedMode = "qr";
+  document.getElementById("phoneBox").style.display = "none";
   const el = document.getElementById("status");
   el.className = "wait";
   el.innerHTML = "⏳ Preparando vinculación por QR...";
@@ -133,9 +134,29 @@ async function update(){
     const s=await r.json();
     const el=document.getElementById("status");
     if(s.connected){el.className="ok";el.innerHTML="✅ Bot vinculado correctamente y en línea.";return;}
-    if(s.qr){el.className="";el.innerHTML='<img class="qr" src="https://api.qrserver.com/v1/create-qr-code/?size=500x500&data='+encodeURIComponent(s.qr)+'&t='+Date.now()+'" alt="Código QR"><p>📱 WhatsApp → Dispositivos vinculados → Vincular un dispositivo.</p>';return;}
-    if(s.pairingCode){el.className="";el.innerHTML='<p>🔐 Código de vinculación</p><div class="code">'+s.pairingCode+'</div><p>En WhatsApp: Dispositivos vinculados → Vincular un dispositivo → Vincular con número de teléfono.</p>';return;}
-    el.className="wait";el.innerHTML="⏳ Esperando a que WhatsApp genere QR o código...";
+
+    if(selectedMode === "qr" && s.qr){
+      el.className="";
+      el.innerHTML='<img class="qr" src="https://api.qrserver.com/v1/create-qr-code/?size=500x500&data='+encodeURIComponent(s.qr)+'&t='+Date.now()+'" alt="Código QR"><p>📱 WhatsApp → Dispositivos vinculados → Vincular un dispositivo.</p>';
+      return;
+    }
+
+    if(selectedMode === "phone" && s.pairingCode){
+      el.className="";
+      el.innerHTML='<p>🔐 Código de vinculación</p><div class="code">'+s.pairingCode+'</div><p>En WhatsApp: Dispositivos vinculados → Vincular un dispositivo → Vincular con número de teléfono.</p>';
+      return;
+    }
+
+    if(!selectedMode){
+      el.className="wait";
+      el.innerHTML="👆 Elige una opción para vincular WhatsApp.";
+      return;
+    }
+
+    el.className="wait";
+    el.innerHTML=selectedMode === "qr"
+      ? "⏳ Esperando a que WhatsApp genere el QR..."
+      : "⏳ Esperando a que WhatsApp genere el código...";
   }catch(e){document.getElementById("status").innerHTML="⚠️ Panel esperando al bot...";}
 }
 update();setInterval(update,5000);
