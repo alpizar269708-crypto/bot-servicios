@@ -267,45 +267,74 @@ function cleanName(text, amountRaw) {
     .trim();
 }
 
+function editDistance(a, b) {
+  a = String(a || "");
+  b = String(b || "");
+
+  const dp = Array.from({ length: a.length + 1 }, () => Array(b.length + 1).fill(0));
+  for (let i = 0; i <= a.length; i++) dp[i][0] = i;
+  for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+
+      // Acepta letras cambiadas de lugar, por ejemplo "pga" = "pag".
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        dp[i][j] = Math.min(dp[i][j], dp[i - 2][j - 2] + 1);
+      }
+    }
+  }
+  return dp[a.length][b.length];
+}
+
+function fuzzyWord(word, accepted, maxDistance = 1) {
+  const w = norm(word);
+  return accepted.some(x => editDistance(w, x) <= maxDistance);
+}
+
+function fuzzyPhrase(words, acceptedPhrases) {
+  return acceptedPhrases.some(phrase => {
+    const p = phrase.split(" ");
+    if (p.length !== words.length) return false;
+    return p.every((part, i) => fuzzyWord(words[i], [part], part.length <= 3 ? 1 : 2));
+  });
+}
+
+function isPaymentWord(word) {
+  const w = norm(word);
+  if (w === "p") return true;
+  return fuzzyWord(w, ["pa", "pag", "pago", "pagado", "pagar", "paf"], 1);
+}
+
+function isTransferWord(word) {
+  return fuzzyWord(norm(word), ["t", "tr", "tra", "trans", "transf", "transfer", "transferencia"], 1);
+}
+
+function isRetiroWord(word) {
+  return fuzzyWord(norm(word), ["retiro", "retirar", "ret", "r"], 1);
+}
+
 function commandOf(text) {
   let t = norm(text);
   if (t.startsWith(PREFIX)) t = t.slice(PREFIX.length).trim();
 
   const words = t.split(/\s+/).filter(Boolean);
   if (!words.length) return null;
-
   const joined = words.join(" ");
 
-  // Consultas y menú.
-  if (joined === "menu" || joined === "ayuda") return "menu";
-  if (joined === "activarbotservicios") return "activar";
-  if (joined === "deudores" || joined === "deudor") return "deudores";
-  if (joined === "pagados" || joined === "pagado") return "pagados";
-  if (joined === "listaservicios" || joined === "lista servicios" || joined === "lista servicio") return "listaservicios";
-
-  // Pago. Se aceptan abreviaturas y errores comunes:
-  // p, pa, pag, pago, pagado, pagar, paf, etc.
-  // Puede ir antes o después del nombre.
-  const paymentWord = /^(?:p|pa|pag|pago|pagado|pagar|paf)$/i;
-  if (words.some(w => paymentWord.test(w))) return "pag";
-
-  // Transferencia. Puede ir antes o después del nombre.
-  const transferWord = /^(?:t|tr|tra|trans|transf|transfer|transferencia)$/i;
-  if (words.some(w => transferWord.test(w))) return "transferencia";
-
-  // Nueva cuenta.
-  if (
-    joined === "cuenta nueva" ||
-    joined === "cuentanueva" ||
-    /^cuenta nueva\s+/.test(joined) ||
-    /^cuentanueva\s+/.test(joined)
-  ) return "cuenta_nueva";
-
-  // Cerrar ciclo.
-  if (joined === "cerrar ciclo" || /^cerrar ciclo\s+/.test(joined)) return "cerrar_ciclo";
-
-  // Retiro.
-  if (/^(?:retiro|retirar|ret|r)(?:\s|$)/.test(joined)) return "retiro";
+  // Los comandos toleran faltas de ortografía y letras cambiadas.
+  if (fuzzyWord(joined, ["menu", "ayuda"], 2)) return "menu";
+  if (fuzzyWord(joined, ["activarbotservicios"], 2)) return "activar";
+  if (fuzzyWord(joined, ["deudores", "deudor"], 2)) return "deudores";
+  if (fuzzyWord(joined, ["pagados", "pagado"], 2)) return "pagados";
+  if (fuzzyWord(joined, ["listaservicios"], 2) || fuzzyPhrase(words, ["lista servicios", "lista servicio"])) return "listaservicios";
+  if (words.some(isPaymentWord)) return "pag";
+  if (words.some(isTransferWord)) return "transferencia";
+  if (fuzzyPhrase(words, ["cuenta nueva"]) || fuzzyWord(joined, ["cuentanueva"], 2)) return "cuenta_nueva";
+  if (fuzzyPhrase(words, ["cerrar ciclo"])) return "cerrar_ciclo";
+  if (isRetiroWord(words[0])) return "retiro";
 
   return null;
 }
@@ -335,7 +364,7 @@ function quotedServiceName(text) {
   const botName = t.match(/(?:👤|Usuario:?)[\\s:*]*([^\\n]+?)(?=\\n|💵|$)/i);
   if (botName) return botName[1].replace(/[*_]/g, "").trim();
 
-  // Mensajes humanos tipo "Juan 250" o "250 Juan".
+  // Mensajes humanos tipo "Persona 250" o "250 Persona".
   const a = amountFrom(t);
   if (a) return cleanName(t, a.raw);
 
@@ -346,24 +375,17 @@ function paymentNameFromText(text) {
   let t = String(text || "").trim();
   if (t.startsWith(PREFIX)) t = t.slice(PREFIX.length).trim();
 
-  const paymentWord = /^(?:p|pa|pag|pago|pagado|pagar|paf)$/i;
   const words = t.split(/\s+/).filter(Boolean);
   if (!words.length) return "";
 
-  // Quita la palabra que indica pago, esté donde esté.
-  t = words.filter(w => !paymentWord.test(w)).join(" ").trim();
-
-  // Si escribieron algo como "Juan pagado".
-  t = t.replace(/\b(?:p|pa|pag|pago|pagado|pagar|paf)\b/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  // Quita la palabra de pago, esté antes o después del nombre.
+  t = words.filter(w => !isPaymentWord(w)).join(" ").trim();
 
   const a = amountFrom(t);
   if (a) t = cleanName(t, a.raw);
 
   return t.trim();
 }
-
 async function collections() {
   return {
     accounts: db.collection(COLLECTION + "_accounts"),
@@ -691,20 +713,20 @@ function menu() {
     "📋 *MENÚ*",
     "",
     "🧾 *SERVICIO*",
-    "250 Juan",
-    "Juan 250",
+    "250 Persona",
+    "Persona 250",
     "",
     "💵 *PAGO*",
-    "pag Juan",
-    "Juan pag",
-    "p Juan",
-    "Juan p",
-    "↩️ También puedes RESPONDER al mensaje y escribir: p",
+    "pag Persona",
+    "Persona pag",
+    "p Persona",
+    "Persona p",
+    "↩️ Responde al mensaje y escribe: pag Persona",
     "",
     "🔄 *TRANSFERENCIA*",
-    "transferencia Juan 500",
-    "Juan transferencia 500",
-    "t Juan 500",
+    "transferencia Persona 500",
+    "Persona transferencia 500",
+    "t Persona 500",
     "",
     "💸 *RETIRO*",
     "retiro 5000",
@@ -860,7 +882,7 @@ async function handleMessage(msg) {
     let args = text.trim();
     if (args.startsWith(PREFIX)) args = args.slice(PREFIX.length).trim();
 
-    // Acepta "pag Juan", "Juan pag", "p Juan", "Juan p", etc.
+    // Acepta "pag Persona", "Persona pag", "p Persona", "Persona p", etc.
     // Si se responde a cualquier mensaje de servicio, usa el nombre citado.
     let name = paymentNameFromText(args);
     if (!name && quoted) name = quotedServiceName(quoted);
