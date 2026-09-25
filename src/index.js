@@ -28,7 +28,9 @@ if (!MONGO_URI) {
   process.exit(1);
 }
 
-const logger = pino({ level: process.env.LOG_LEVEL || "silent" });
+// Baileys puede imprimir objetos enormes de sesiones/llaves cuando el nivel de log es alto.
+// Lo dejamos silencioso para mantener los logs de Render limpios y no exponer material de sesión.
+const logger = pino({ level: "silent" });
 const mongo = new MongoClient(MONGO_URI);
 let db;
 let sock;
