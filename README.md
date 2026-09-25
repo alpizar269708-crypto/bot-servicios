@@ -46,4 +46,4 @@ Variables: MONGO_URI, MONGO_DB_NAME, OWNER_PHONE, PAIRING_PHONE, MULTIPLIER_250,
 El primer arranque muestra QR en logs. Si PAIRING_PHONE está configurado, también solicita código de vinculación.
 En WhatsApp: Ajustes > Dispositivos vinculados > Vincular un dispositivo > Vincular con número de teléfono.
 
-IMPORTANTE: los datos operativos se guardan en MongoDB. La sesión de Baileys queda en .auth local en esta versión; antes de producción definitiva conviene mover también las credenciales de WhatsApp a MongoDB.
+IMPORTANTE: los datos operativos y las credenciales de la sesión de Baileys se guardan en MongoDB. Esto permite que el Worker de Render pueda reiniciarse sin perder la sesión por depender de almacenamiento local.
