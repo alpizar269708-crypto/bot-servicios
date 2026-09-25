@@ -1,18 +1,41 @@
 
 require("dotenv").config();
 
-// libsignal (usado internamente por Baileys) imprime directamente en console.log
-// detalles enormes de SessionEntry. Los filtramos sin ocultar los logs normales del bot.
+// libsignal (usado internamente por Baileys) puede escribir directamente en stdout/stderr
+// objetos enormes de SessionEntry. Filtramos solo esos dumps para no exponer material de sesión.
 const originalConsoleLog = console.log;
+const originalConsoleError = console.error;
+const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+const originalStderrWrite = process.stderr.write.bind(process.stderr);
+
+function isSessionDump(value) {
+  const s = String(value || "");
+  return (
+    s.includes("Closing session: SessionEntry") ||
+    s.includes("Removing old closed session: SessionEntry") ||
+    s.includes("Closing stale open session") ||
+    s.includes("Closing open session in favor of incoming prekey bundle")
+  );
+}
+
 console.log = (...args) => {
-  const first = String(args[0] || "");
-  if (
-    first.startsWith("Closing session: SessionEntry") ||
-    first.startsWith("Removing old closed session: SessionEntry") ||
-    first.startsWith("Closing stale open session") ||
-    first.startsWith("Closing open session in favor of incoming prekey bundle")
-  ) return;
+  if (args.some(isSessionDump)) return;
   originalConsoleLog(...args);
+};
+
+console.error = (...args) => {
+  if (args.some(isSessionDump)) return;
+  originalConsoleError(...args);
+};
+
+process.stdout.write = (chunk, ...args) => {
+  if (isSessionDump(chunk)) return true;
+  return originalStdoutWrite(chunk, ...args);
+};
+
+process.stderr.write = (chunk, ...args) => {
+  if (isSessionDump(chunk)) return true;
+  return originalStderrWrite(chunk, ...args);
 };
 
 const {
