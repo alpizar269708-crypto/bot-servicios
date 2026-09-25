@@ -396,7 +396,8 @@ async function collections() {
     payments: db.collection(COLLECTION + "_payments"),
     transfers: db.collection(COLLECTION + "_transfers"),
     withdrawals: db.collection(COLLECTION + "_withdrawals"),
-    auth: db.collection(COLLECTION + "_auth")
+    auth: db.collection(COLLECTION + "_auth"),
+    activation: db.collection(COLLECTION + "_activation")
   };
 }
 
@@ -489,6 +490,39 @@ async function useMongoAuth() {
       );
     }
   };
+}
+
+async function isActivatedChat(jid) {
+  if (!jid || !jid.endsWith("@g.us")) return false;
+  const { activation } = await collections();
+  const doc = await activation.findOne({ _id: "active" });
+  return !!doc && doc.jid === jid;
+}
+
+async function activateChat(jid) {
+  if (!jid || !jid.endsWith("@g.us")) {
+    return { ok: false, reason: "group_only" };
+  }
+
+  const { activation } = await collections();
+  const current = await activation.findOne({ _id: "active" });
+
+  if (current && current.jid !== jid) {
+    return { ok: false, reason: "already_active", jid: current.jid };
+  }
+
+  await activation.updateOne(
+    { _id: "active" },
+    {
+      $set: {
+        jid,
+        activatedAt: current?.activatedAt || new Date()
+      }
+    },
+    { upsert: true }
+  );
+
+  return { ok: true };
 }
 
 async function ensureIndexes() {
@@ -784,10 +818,28 @@ async function handleMessage(msg) {
   const command = commandOf(text);
   const quoted = quotedText(msg);
 
-  if (command === "activar" || command === "menu") {
-    await send(jid, command === "activar"
-      ? "🤖 *BOT ACTIVADO*\n" + menu()
-      : menu());
+  if (command === "activar") {
+    const result = await activateChat(jid);
+
+    if (!result.ok) {
+      await send(jid,
+        result.reason === "group_only"
+          ? "❌ Este comando solo funciona dentro de un grupo."
+          : "ℹ️ El bot ya está activado en otro grupo."
+      );
+      return;
+    }
+
+    await send(jid, "🤖 *BOT ACTIVADO*\n" + menu());
+    return;
+  }
+
+  // El bot solo funciona en el único grupo que fue activado.
+  // Fuera de ese grupo no responde a ningún comando ni registra datos.
+  if (!(await isActivatedChat(jid))) return;
+
+  if (command === "menu") {
+    await send(jid, menu());
     return;
   }
 
