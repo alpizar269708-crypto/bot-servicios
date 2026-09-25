@@ -934,7 +934,7 @@ async function handleMessage(msg) {
   }
 
   if (command === "deudoresp") {
-    const numbers = [...text.matchAll(/(?:^|\\s)(\\d+)(?=\\s|$)/g)]
+    const numbers = [...text.matchAll(/(?:^|\s)(\d+)(?=\s|$)/g)]
       .map(m => Number(m[1]))
       .filter(n => n > 0);
 
