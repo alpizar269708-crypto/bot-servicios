@@ -34,16 +34,16 @@ let sock;
 let starting = false;
 
 function cleanPhone(v) {
-  return String(v || "").replace(/\\D/g, "");
+  return String(v || "").replace(/\D/g, "");
 }
 
 function norm(v) {
   return String(v || "")
     .normalize("NFD")
-    .replace(/[\\u0300-\\u036f]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim()
-    .replace(/\\s+/g, " ");
+    .replace(/\s+/g, " ");
 }
 
 function phoneFromJid(jid) {
@@ -64,7 +64,7 @@ function parseAmount(v) {
 }
 
 function amountFrom(text) {
-  const m = String(text).match(/(?:^|\\s)\\$?\\d+(?:[.,]\\d{1,2})?(?=\\s|$)/);
+  const m = String(text).match(/(?:^|\s)\$?\d+(?:[.,]\d{1,2})?(?=\s|$)/);
   if (!m) return null;
   const raw = m[0].trim();
   const amount = parseAmount(raw);
@@ -74,8 +74,8 @@ function amountFrom(text) {
 function cleanName(text, amountRaw) {
   return String(text || "")
     .replace(amountRaw || "", " ")
-    .replace(/\\b(transferencia|transfer|transf|servicio|servicios)\\b/gi, " ")
-    .replace(/\\s+/g, " ")
+    .replace(/\b(transferencia|transfer|transf|servicio|servicios)\b/gi, " ")
+    .replace(/\s+/g, " ")
     .replace(/^[,.:;-]+|[,.:;-]+$/g, "")
     .trim();
 }
@@ -347,7 +347,6 @@ async function pay(name) {
   if (!p) return { ok: false, reason: "not_found" };
 
   const pending = await c.services.find({
-    accountNumber: account.number,
     personId: p._id,
     status: "pending"
   }).sort({ createdAt: 1 }).toArray();
@@ -419,7 +418,7 @@ async function send(jid, text) {
 
 async function handleMessage(msg) {
   const jid = msg.key.remoteJid;
-  if (!jid || jid.endsWith("@g.us") === false && !msg.key.fromMe) return;
+  if (!jid) return;
 
   const text =
     msg.message?.conversation ||
@@ -434,7 +433,7 @@ async function handleMessage(msg) {
 
   if (command === "activar" || command === "menu") {
     await send(jid, command === "activar"
-      ? "🤖 *Bot de servicios activado.*\\n\\n" + menu()
+      ? "🤖 *Bot de servicios activado.*\n\n" + menu()
       : menu());
     return;
   }
@@ -453,7 +452,7 @@ async function handleMessage(msg) {
         " (" + x.count + " servicio" + (x.count === 1 ? "" : "s") + ")";
     }).join("\n");
 
-    await send(jid, "👥 *DEUDORES*\\n\\n" + body +
+    await send(jid, "👥 *DEUDORES*\n\n" + body +
       "\n\n💰 Total pendiente: *" + money(total) + "*");
     return;
   }
@@ -469,7 +468,7 @@ async function handleMessage(msg) {
       : "No hay servicios registrados.";
 
     await send(jid,
-      "📋 *SERVICIOS — CUENTA " + s.account.number + "*\\n\\n" +
+      "📋 *SERVICIOS — CUENTA " + s.account.number + "*\n\n" +
       body + "\n\n" +
       "🔢 Cantidad total: *" + s.rows.length + "*\n" +
       "💰 Suma total: *" + money(s.total) + "*\n" +
@@ -495,7 +494,7 @@ async function handleMessage(msg) {
       (i + 1) + ". " + x.personName + " — " + money(x.amount)
     ).join("\n");
 
-    await send(jid, "💵 *PAGADOS*\\n\\n" + body +
+    await send(jid, "💵 *PAGADOS*\n\n" + body +
       "\n\nTotal pagado: *" + money(total) + "*");
     return;
   }
@@ -503,7 +502,7 @@ async function handleMessage(msg) {
   if (command === "pag") {
     let args = text.trim();
     if (args.startsWith(PREFIX)) args = args.slice(PREFIX.length).trim();
-    args = args.split(/\\s+/).slice(1).join(" ").trim();
+    args = args.split(/\s+/).slice(1).join(" ").trim();
 
     if (!args) {
       await send(jid, "❌ Usa: " + PREFIX + "pag NOMBRE");
@@ -520,7 +519,7 @@ async function handleMessage(msg) {
     }
 
     await send(jid,
-      "✅ *PAGO REGISTRADO*\\n\\n" +
+      "✅ *PAGO REGISTRADO*\n\n" +
       "👤 " + result.person.name + "\n" +
       "💵 Total: *" + money(result.total) + "*\n" +
       "🧾 Servicios liquidados: *" + result.count + "*"
@@ -531,7 +530,7 @@ async function handleMessage(msg) {
   if (command === "transferencia") {
     let args = text.trim();
     if (args.startsWith(PREFIX)) args = args.slice(PREFIX.length).trim();
-    args = args.split(/\\s+/).slice(1).join(" ").trim();
+    args = args.split(/\s+/).slice(1).join(" ").trim();
 
     const a = amountFrom(args);
     if (!a) {
@@ -547,7 +546,7 @@ async function handleMessage(msg) {
 
     await addService(name, a.amount, jid, true);
     await send(jid,
-      "🔄 *TRANSFERENCIA REGISTRADA*\\n\\n" +
+      "🔄 *TRANSFERENCIA REGISTRADA*\n\n" +
       "👤 " + name + "\n" +
       "💵 " + money(a.amount) + "\n" +
       "🚫 No se suma al total de servicios."
@@ -563,12 +562,12 @@ async function handleMessage(msg) {
 
     let args = text.trim();
     if (args.startsWith(PREFIX)) args = args.slice(PREFIX.length).trim();
-    const rest = args.split(/\\s+/).slice(2).join(" ");
+    const rest = args.split(/\s+/).slice(2).join(" ");
     const a = amountFrom(rest);
     const account = await newAccount(a ? a.amount : 0);
 
     await send(jid,
-      "🆕 *CUENTA NUEVA*\\n\\n" +
+      "🆕 *CUENTA NUEVA*\n\n" +
       "Cuenta: *" + account.number + "*\n" +
       "Monto inicial: *" + money(account.initialAmount) + "*\n\n" +
       "📚 El historial anterior se conserva."
@@ -605,7 +604,7 @@ async function handleMessage(msg) {
     );
 
     await send(jid,
-      "🔒 *CICLO CERRADO*\\n\\n" +
+      "🔒 *CICLO CERRADO*\n\n" +
       "🧾 Servicios: *" + s.rows.length + "*\n" +
       "💰 Total: *" + money(s.total) + "*\n" +
       "⏳ Pendiente: *" + money(s.pendingTotal) + "*\n" +
@@ -621,13 +620,13 @@ async function handleMessage(msg) {
   if (a) {
     const name = cleanName(raw, a.raw);
     if (name.length >= 2) {
-      const transfer = /\\b(transferencia|transfer|transf)\\b/i.test(raw);
+      const transfer = /\b(transferencia|transfer|transf)\b/i.test(raw);
       const type = await addService(name, a.amount, jid, transfer);
 
       if (type === "transfer") {
         await send(jid,
           "🔄 Transferencia registrada: *" + name + "* — *" +
-          money(a.amount) + "*\\n🚫 No se suma al total.");
+          money(a.amount) + "*\n🚫 No se suma al total.");
       } else {
         await send(jid,
           "🧾 Servicio registrado: *" + name + "* — *" +
