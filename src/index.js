@@ -781,10 +781,6 @@ function menu() {
   return [
     "📋 *MENÚ*",
     "",
-    "🧾 *SERVICIO*",
-    "250 Persona",
-    "Persona 250",
-    "",
     "💵 *PAGO*",
     "Marca un servicio como pagado.",
     "Responde al mensaje del servicio y escribe:",
@@ -793,8 +789,7 @@ function menu() {
     "",
     "🔄 *TRANSFERENCIA*",
     "Registra el pago por transferencia.",
-    "No se suma al dinero disponible.",
-    "Ejemplo: transferencia Persona 250",
+    "No se suma al dinero del corte.",
     "",
     "💸 *RETIRO*",
     "Registra dinero que se entrega o se deposita a Beto.",
@@ -804,7 +799,6 @@ function menu() {
     "deudores — ve quiénes deben.",
     "deudoresp 1 3 9 — marca como pagados varios deudores de la lista.",
     "",
-
     "📋 *LISTA*",
     "lista servicios — consulta los servicios.",
     "",
