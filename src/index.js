@@ -1224,14 +1224,22 @@ async function handleMessage(msg) {
       }
     );
 
+    const services35 = s.rows.filter(x => Number(x.amount) === 35);
+    const services250 = s.rows.filter(x => Number(x.amount) === 250);
+
+    const total35 = services35.reduce((sum, x) => sum + Number(x.amount || 0), 0);
+    const total250 = services250.reduce((sum, x) => sum + Number(x.amount || 0), 0);
+
     await send(jid,
       "✂️ *CORTE*\n\n" +
       "📋 Servicios: *" + s.rows.length + "*\n" +
+      "🔹 $35: *" + services35.length + "* servicios — *" + money(total35) + "*\n" +
+      "🔹 $250: *" + services250.length + "* servicios — *" + money(total250) + "*\n" +
       "💰 Suma: *" + money(s.total) + "*\n" +
       "💸 Retiros: *" + money(s.withdrawnTotal) + "*\n" +
-      "📊 Final: *" + money(s.netTotal) + "*\n" +
       "⏳ Pendiente: *" + money(s.pendingTotal) + "*\n" +
-      "✅ Pagado: *" + money(s.paidTotal) + "*"
+      "✅ Pagado: *" + money(s.paidTotal) + "*\n" +
+      "📊 Final: *" + money(s.netTotal) + "*"
     );
     return;
   }
