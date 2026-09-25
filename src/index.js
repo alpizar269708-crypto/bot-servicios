@@ -326,7 +326,9 @@ function commandOf(text) {
 
   // Los comandos toleran faltas de ortografía y letras cambiadas.
   if (fuzzyWord(joined, ["menu", "ayuda"], 2)) return "menu";
-  if (fuzzyWord(joined, ["activarbotservicios"], 2)) return "activar";
+  if (fuzzyWord(joined, ["activarbotservicios", "activarbotaqui"], 2)) return "activar";
+  if (fuzzyWord(joined, ["desactivarbotservicios", "desactivarbotaqui"], 2)) return "desactivar";
+  if (fuzzyWord(joined, ["deudoresp", "deudorp", "pagarmultiples", "pagarmultiple"], 2)) return "deudoresp";
   if (fuzzyWord(joined, ["deudores", "deudor"], 2)) return "deudores";
   if (fuzzyWord(joined, ["pagados", "pagado"], 2)) return "pagados";
   if (fuzzyWord(joined, ["listaservicios"], 2) || fuzzyPhrase(words, ["lista servicios", "lista servicio"])) return "listaservicios";
@@ -522,6 +524,26 @@ async function activateChat(jid) {
     { upsert: true }
   );
 
+  return { ok: true };
+}
+
+async function deactivateChat(jid) {
+  if (!jid || !jid.endsWith("@g.us")) {
+    return { ok: false, reason: "group_only" };
+  }
+
+  const { activation } = await collections();
+  const current = await activation.findOne({ _id: "active" });
+
+  if (!current) {
+    return { ok: false, reason: "none" };
+  }
+
+  if (current.jid !== jid) {
+    return { ok: false, reason: "other_group" };
+  }
+
+  await activation.deleteOne({ _id: "active" });
   return { ok: true };
 }
 
@@ -768,6 +790,11 @@ function menu() {
     "",
     "👥 *DEUDORES*",
     "deudores",
+    "deudoresp 1 3 9",
+    "",
+    "🛑 *CAMBIAR DE GRUPO*",
+    "desactivarbotservicios",
+    "activarbotservicios",
     "",
     "📋 *LISTA*",
     "lista servicios",
@@ -834,6 +861,24 @@ async function handleMessage(msg) {
     return;
   }
 
+  if (command === "desactivar") {
+    const result = await deactivateChat(jid);
+
+    if (!result.ok) {
+      await send(jid,
+        result.reason === "group_only"
+          ? "❌ Solo funciona dentro de un grupo."
+          : result.reason === "none"
+            ? "ℹ️ No hay ningún grupo activo."
+            : "ℹ️ Este no es el grupo activo."
+      );
+      return;
+    }
+
+    await send(jid, "🛑 *BOT DESACTIVADO*\nYa puedes activarlo en otro grupo.");
+    return;
+  }
+
   // El bot solo funciona en el único grupo que fue activado.
   // Fuera de ese grupo no responde a ningún comando ni registra datos.
   if (!(await isActivatedChat(jid))) return;
@@ -884,6 +929,79 @@ async function handleMessage(msg) {
     await send(jid,
       "👥 *DEUDORES*\n\n" + body +
       "\n\n💰 Total pendiente: *" + money(total) + "*"
+    );
+    return;
+  }
+
+  if (command === "deudoresp") {
+    const numbers = [...text.matchAll(/(?:^|\\s)(\\d+)(?=\\s|$)/g)]
+      .map(m => Number(m[1]))
+      .filter(n => n > 0);
+
+    const uniqueNumbers = [...new Set(numbers)];
+
+    if (!uniqueNumbers.length) {
+      await send(jid,
+        "❌ Escribe los números de los deudores.\n" +
+        "Ejemplo:\n" +
+        "deudoresp\n1\n3\n9"
+      );
+      return;
+    }
+
+    const { services } = await collections();
+    const rows = await services.find({
+      status: "pending",
+      personName: { $not: /^retiro$/i }
+    }).sort({ createdAt: 1 }).toArray();
+
+    const grouped = new Map();
+    for (const x of rows) {
+      const key = String(x.personId);
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          name: x.personName,
+          total: 0,
+          rows: []
+        });
+      }
+      const g = grouped.get(key);
+      g.total += Number(x.amount || 0);
+      g.rows.push(x);
+    }
+
+    const debtorsList = [...grouped.values()];
+    const selected = [];
+    const missing = [];
+
+    for (const n of uniqueNumbers) {
+      const g = debtorsList[n - 1];
+      if (!g) {
+        missing.push(n);
+      } else {
+        selected.push(g);
+      }
+    }
+
+    if (!selected.length) {
+      await send(jid, "❌ Esos números no existen en la lista de deudores.");
+      return;
+    }
+
+    const results = [];
+    for (const g of selected) {
+      const result = await pay(g.name);
+      if (result.ok) {
+        results.push("✅ " + g.name + " — " + money(result.total));
+      } else {
+        results.push("⚠️ " + g.name + " — ya no tiene pendientes");
+      }
+    }
+
+    await send(jid,
+      "💵 *PAGOS REGISTRADOS*\n\n" +
+      results.join("\n") +
+      (missing.length ? "\n\n❌ No existe: " + missing.join(", ") : "")
     );
     return;
   }
