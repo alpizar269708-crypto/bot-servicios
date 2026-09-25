@@ -933,8 +933,8 @@ async function handleMessage(msg) {
   }
 
   if (command === "deudoresp") {
-    const numbers = [...text.matchAll(/(?:^|\s)(\d+)(?=\s|$)/g)]
-      .map(m => Number(m[1]))
+    const numbers = [...text.matchAll(/\d+/g)]
+      .map(m => Number(m[0]))
       .filter(n => n > 0);
 
     const uniqueNumbers = [...new Set(numbers)];
