@@ -166,7 +166,7 @@ async function update(){
       : "⏳ Esperando a que WhatsApp genere el código...";
   }catch(e){document.getElementById("status").innerHTML="⚠️ Panel esperando al bot...";}
 }
-update();setInterval(update,15000);
+update();setInterval(update,120000);
 </script></body></html>`);
 });
 
