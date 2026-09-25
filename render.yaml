@@ -1,0 +1,23 @@
+services:
+  - type: worker
+    name: bot-servicios
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: MONGO_URI
+        sync: false
+      - key: MONGO_DB_NAME
+        value: bot_servicios
+      - key: OWNER_PHONE
+        sync: false
+      - key: PAIRING_PHONE
+        sync: false
+      - key: MULTIPLIER_250
+        value: "1"
+      - key: COMMAND_PREFIX
+        value: "!"
+      - key: COLLECTION_NAME
+        value: bot_servicios
