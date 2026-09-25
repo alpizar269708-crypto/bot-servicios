@@ -916,10 +916,10 @@ async function handleMessage(msg) {
     const body = [...grouped.values()].map((g, i) => {
       total += g.total;
       const details = g.rows.map(x =>
-        "   📅 " + new Date(x.createdAt).toLocaleDateString("es-MX", {
+        "   💵 " + money(x.amount) + "   📅 " + new Date(x.createdAt).toLocaleDateString("es-MX", {
           timeZone: "America/Mexico_City",
           dateStyle: "short"
-        }) + " — " + money(x.amount)
+        })
       ).join("\n");
 
       return (i + 1) + ". 👤 *" + g.name + "* — " + money(g.total) + "\n" + details;
