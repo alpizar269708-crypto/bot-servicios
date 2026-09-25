@@ -38,6 +38,7 @@ let currentPairingCode = null;
 let requestedPairingPhone = null;
 let pairingInProgress = false;
 let botConnected = false;
+let reconnectTimer = null;
 let authState = null;
 let loginMode = null;
 let loginPhone = "";
@@ -54,6 +55,11 @@ function panelStatus() {
     pairingCode: currentPairingCode
   };
 }
+
+app.get("/health", (req, res) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.type("text/plain").send("OK");
+});
 
 app.get("/status", (req, res) => {
   res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
@@ -1294,6 +1300,20 @@ async function resetWhatsAppAuth() {
   console.log("🧹 Sesión de WhatsApp inválida eliminada.");
 }
 
+function scheduleReconnect() {
+  if (reconnectTimer || botConnected || starting) return;
+
+  reconnectTimer = setTimeout(async () => {
+    reconnectTimer = null;
+    try {
+      await start(loginMode || "qr", loginPhone || "");
+    } catch (error) {
+      console.error("❌ Error en la reconexión:", error?.message || error);
+      scheduleReconnect();
+    }
+  }, 3000);
+}
+
 async function start(mode = "qr", phone = "", onCodeReady = null) {
   if (starting || sock) return;
   starting = true;
@@ -1404,7 +1424,7 @@ async function start(mode = "qr", phone = "", onCodeReady = null) {
           return;
         }
 
-        setTimeout(() => start(loginMode || "qr", loginPhone || ""), 3000);
+        scheduleReconnect();
       }
     });
 
@@ -1421,7 +1441,7 @@ async function start(mode = "qr", phone = "", onCodeReady = null) {
     starting = false;
     sock = null;
     console.error("❌ Error iniciando WhatsApp:", error?.message || error);
-    setTimeout(() => start(loginMode || mode, loginPhone || phone), 5000);
+    scheduleReconnect();
   }
 }
 
