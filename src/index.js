@@ -114,7 +114,7 @@ async function update(){
     el.className="wait";el.innerHTML="⏳ Esperando a que WhatsApp genere QR o código...";
   }catch(e){document.getElementById("status").innerHTML="⚠️ Panel esperando al bot...";}
 }
-update();setInterval(update,1000);
+update();setInterval(update,5000);
 </script></body></html>`);
 });
 
@@ -725,6 +725,15 @@ async function handleMessage(msg) {
   }
 }
 
+async function resetWhatsAppAuth() {
+  const auth = (await collections()).auth;
+  await auth.deleteMany({});
+  currentQR = null;
+  currentPairingCode = null;
+  botConnected = false;
+  console.log("🧹 Sesión de WhatsApp inválida eliminada.");
+}
+
 async function start() {
   if (starting) return;
   starting = true;
@@ -779,7 +788,16 @@ async function start() {
 
         console.log(`⚠️ WhatsApp desconectado (código ${code ?? "desconocido"}). ${retry ? "Reintentando..." : "No se reintentará."}`);
 
-        if (retry) setTimeout(start, 5000);
+        if (code === 401) {
+          try {
+            await resetWhatsAppAuth();
+          } catch (e) {
+            console.error("❌ Error limpiando sesión:", e?.message || e);
+          }
+          setTimeout(start, 3000);
+        } else if (retry) {
+          setTimeout(start, 5000);
+        }
       }
     });
 
