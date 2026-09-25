@@ -14,6 +14,8 @@ const {
 const { MongoClient } = require("mongodb");
 const pino = require("pino");
 const express = require("express");
+const { useMongoDBAuthState } = require("./mongoAuth");
+const mongoose = require("mongoose");
 
 const MONGO_URI = process.env.MONGO_URI;
 const DB_NAME = process.env.MONGO_DB_NAME || "bot_servicios";
@@ -36,6 +38,9 @@ let currentPairingCode = null;
 let requestedPairingPhone = null;
 let pairingInProgress = false;
 let botConnected = false;
+let authState = null;
+let loginMode = null;
+let loginPhone = "";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -55,14 +60,7 @@ app.get("/status", (req, res) => {
 
 app.get("/pairing", async (req, res) => {
   res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-
-  if (!sock) {
-    return res.status(503).json({ ok: false, error: "WhatsApp todavía no está iniciado." });
-  }
-
-  if (botConnected) {
-    return res.json({ ok: true, connected: true });
-  }
+  if (botConnected) return res.json({ ok: true, connected: true });
 
   const phone = cleanPhone(req.query.phone);
   if (!phone || phone.length < 10) {
@@ -70,18 +68,36 @@ app.get("/pairing", async (req, res) => {
   }
 
   try {
+    loginMode = "phone";
+    loginPhone = phone;
     requestedPairingPhone = phone;
     currentPairingCode = null;
 
-    if (!currentQR) {
-      return res.json({ ok: true, waiting: true, message: "WhatsApp está preparando la vinculación. El código aparecerá en unos segundos." });
+    if (!sock) {
+      await start("phone", phone);
+      return res.json({ ok: true, waiting: true });
     }
 
     const code = await generatePairingCode();
     return res.json({ ok: true, pairingCode: code });
   } catch (error) {
-    requestedPairingPhone = null;
     console.error("❌ No se pudo generar el código:", error?.message || error);
+    return res.status(500).json({ ok: false, error: error?.message || String(error) });
+  }
+});
+
+app.get("/qr", async (req, res) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  if (botConnected) return res.json({ ok: true, connected: true });
+
+  try {
+    loginMode = "qr";
+    loginPhone = "";
+    requestedPairingPhone = null;
+    currentPairingCode = null;
+    if (!sock) await start("qr", "");
+    return res.json({ ok: true, waiting: true });
+  } catch (error) {
     return res.status(500).json({ ok: false, error: error?.message || String(error) });
   }
 });
@@ -97,7 +113,7 @@ async function showQR(){
   const el = document.getElementById("status");
   el.className = "wait";
   el.innerHTML = "⏳ Preparando vinculación por QR...";
-  await update();
+  await fetch("/qr?_="+Date.now(),{cache:"no-store"}); await update();
 }
 
 function showPhone(){
@@ -803,104 +819,45 @@ async function resetWhatsAppAuth() {
   console.log("🧹 Sesión de WhatsApp inválida eliminada.");
 }
 
-async function start() {
-  if (starting) return;
+async function start(mode = "qr", phone = "") {
+  if (starting || sock) return;
   starting = true;
+  loginMode = mode;
+  loginPhone = phone;
 
   try {
-    const { state, saveCreds } = await useMongoAuth();
+    if (!authState) authState = await useMongoDBAuthState("sesion");
+    const { state, saveCreds } = authState;
     const latest = await fetchLatestBaileysVersion();
 
     sock = makeWASocket({
       version: latest.version,
       logger,
       auth: state,
-      browser: Browsers.macOS("Desktop"),
-      markOnlineOnConnect: false,
+      browser: Browsers.ubuntu("Chrome"),
       syncFullHistory: false,
-      printQRInTerminal: false
+      generateHighQualityLinkPreview: false,
+      markOnlineOnConnect: true,
+      printQRInTerminal: false,
+      getMessage: async () => ({ conversation: "" })
     });
 
     sock.ev.on("creds.update", saveCreds);
 
-    sock.ev.on("connection.update", async update => {
-      const connection = update.connection;
-
-      if (update.qr) {
-        currentQR = update.qr;
-        console.log("📱 QR generado — disponible únicamente en el panel web.");
-
-        if (requestedPairingPhone && !currentPairingCode && !pairingInProgress) {
-          try {
-            await generatePairingCode();
-          } catch (error) {
-            console.error("❌ No se pudo generar el código de vinculación:", error?.message || error);
-          }
-        }
-      }
-
-      if (connection === "open") {
-        starting = false;
-        botConnected = true;
-        currentQR = null;
-        currentPairingCode = null;
-        requestedPairingPhone = null;
-        pairingInProgress = false;
-        console.log("✅ WhatsApp conectado.");
-
-        if (OWNER_PHONE) {
-          await send(
-            OWNER_PHONE + "@s.whatsapp.net",
-            "🤖 Bot de servicios conectado.\n\nEscribe " + PREFIX + "menu"
-          );
-        }
-      }
-
-      if (connection === "close") {
-        starting = false;
-        botConnected = false;
-
-        const code = update.lastDisconnect?.error?.output?.statusCode;
-        const retry = code !== DisconnectReason.loggedOut;
-
-        console.log(`⚠️ WhatsApp desconectado (código ${code ?? "desconocido"}). ${retry ? "Reintentando..." : "No se reintentará."}`);
-
-        if (code === 401) {
-          try {
-            await resetWhatsAppAuth();
-          } catch (e) {
-            console.error("❌ Error limpiando sesión:", e?.message || e);
-          }
-          setTimeout(start, 3000);
-        } else if (retry) {
-          setTimeout(start, 5000);
-        }
-      }
-    });
-
-    sock.ev.on("messages.upsert", async event => {
-      for (const msg of event.messages) {
-        try {
-          await handleMessage(msg);
-        } catch (error) {
-          console.error("❌ Error procesando mensaje:", error?.message || error);
-        }
-      }
-    });
-
-
-  } catch (error) {
-    starting = false;
-    console.error("❌ Error iniciando WhatsApp:", error?.message || error);
-    setTimeout(start, 10000);
-  }
-}
-
-(async () => {
+    if (mode === "phone" && !state.creds.me && phone) {
+      setTimeout(async () => {
   await mongo.connect();
   db = mongo.db(DB_NAME);
+  await mongoose.connect(MONGO_URI);
+  authState = await useMongoDBAuthState("sesion");
   await ensureIndexes();
   await ensureAccount();
   logger.info("MongoDB conectado.");
-  await start();
+
+  if (authState.state.creds.me) {
+    console.log("✅ Sesión previa detectada. Arrancando bot automáticamente...");
+    await start("qr", "");
+  } else {
+    console.log("⚠️ No hay sesión de WhatsApp. Entra al panel web para vincular el bot.");
+  }
 })();
