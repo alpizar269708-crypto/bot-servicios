@@ -436,15 +436,47 @@ async function activeAccount() {
 async function newAccount(initialAmount) {
   const { accounts, cycles } = await collections();
   const old = await activeAccount();
+  let previousSummary = null;
 
   if (old) {
+    // Guardamos el estado final de la cuenta anterior antes de abrir la nueva.
+    previousSummary = await servicesSummary();
+    const closedAt = new Date();
+
     await accounts.updateOne(
       { _id: old._id },
-      { $set: { active: false, closedAt: new Date() } }
+      {
+        $set: {
+          active: false,
+          closedAt,
+          finalSummary: {
+            count: previousSummary.rows.length,
+            total: previousSummary.total,
+            withdrawals: previousSummary.withdrawnTotal,
+            netTotal: previousSummary.netTotal,
+            pending: previousSummary.pendingTotal,
+            paid: previousSummary.paidTotal
+          }
+        }
+      }
     );
+
     await cycles.updateOne(
       { accountNumber: old.number },
-      { $set: { status: "closed", closedAt: new Date() } }
+      {
+        $set: {
+          status: "closed",
+          closedAt,
+          summary: {
+            count: previousSummary.rows.length,
+            total: previousSummary.total,
+            withdrawals: previousSummary.withdrawnTotal,
+            netTotal: previousSummary.netTotal,
+            pending: previousSummary.pendingTotal,
+            paid: previousSummary.paidTotal
+          }
+        }
+      }
     );
   }
 
@@ -854,11 +886,27 @@ async function handleMessage(msg) {
     const a = amountFrom(rest);
     const account = await newAccount(a ? a.amount : 0);
 
+    const { accounts } = await collections();
+    const previous = await accounts.findOne(
+      { number: account.number - 1 },
+      { sort: { closedAt: -1 } }
+    );
+    const ps = previous?.finalSummary;
+
     await send(jid,
       "🆕 *CUENTA NUEVA*\n" +
       "📁 Cuenta: *" + account.number + "*\n" +
       "💵 Inicio: *" + money(account.initialAmount) + "*\n" +
-      "📚 La cuenta anterior quedó cerrada y su historial se conserva."
+      (ps
+        ? "\n📌 *CUENTA ANTERIOR*\n" +
+          "🧾 Servicios: " + ps.count + "\n" +
+          "💰 Suma: " + money(ps.total) + "\n" +
+          "💸 Retiros: " + money(ps.withdrawals) + "\n" +
+          "📊 Final: " + money(ps.netTotal) + "\n" +
+          "⏳ Pendiente: " + money(ps.pending) + "\n" +
+          "✅ Pagado: " + money(ps.paid)
+        : "\n📚 No había una cuenta anterior.") +
+      "\n\n📚 El historial se conserva."
     );
     return;
   }
