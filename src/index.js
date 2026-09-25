@@ -318,22 +318,38 @@ function commandOf(text) {
 
   const words = t.split(/\s+/).filter(Boolean);
   if (!words.length) return null;
+
+  const first = words[0];
   const joined = words.join(" ");
 
-  // Los comandos toleran faltas de ortografía y letras cambiadas.
-  if (fuzzyWord(joined, ["menu", "ayuda"], 2)) return "menu";
+  // Comandos de una sola palabra.
+  if (fuzzyWord(first, ["menu", "ayuda"], 2)) return "menu";
+  if (fuzzyWord(first, ["deudores", "deudor"], 1) && words.length === 1) return "deudores";
+  if (fuzzyWord(first, ["pagados", "pagado"], 2) && words.length === 1) return "pagados";
+  if (fuzzyWord(first, ["corte"], 1) && words.length === 1) return "corte";
+
+  // Activación y desactivación.
   if (fuzzyWord(joined, ["activarbotservicios", "activarbotaqui"], 2)) return "activar";
   if (fuzzyWord(joined, ["desactivarbotservicios", "desactivarbotaqui"], 2)) return "desactivar";
-  if (fuzzyWord(joined, ["deudores", "deudor"], 1)) return "deudores";
-  if (fuzzyWord(words[0], ["deudoresp"], 1)) return "deudoresp";
-  if (fuzzyWord(joined, ["pagados", "pagado"], 2)) return "pagados";
-  if (fuzzyWord(joined, ["listaservicios"], 2) || fuzzyPhrase(words, ["lista servicios", "lista servicio"])) return "listaservicios";
+
+  // Pago múltiple: permite "deudoresp 1 3 5", "deudoresp 1-3" y combinaciones.
+  if (fuzzyWord(first, ["deudoresp"], 1)) return "deudoresp";
+
+  if (
+    fuzzyWord(first, ["listaservicios"], 2) ||
+    fuzzyPhrase(words, ["lista servicios", "lista servicio"])
+  ) return "listaservicios";
+
   if (words.some(isPaymentWord)) return "pag";
   if (words.some(isTransferWord)) return "transferencia";
-  if (fuzzyPhrase(words, ["cuenta nueva"]) || fuzzyWord(joined, ["cuentanueva"], 2)) return "cuenta_nueva";
-  if (fuzzyPhrase(words, ["corte"])) return "corte";
+
+  if (
+    fuzzyPhrase(words, ["cuenta nueva"]) ||
+    fuzzyWord(joined, ["cuentanueva"], 2)
+  ) return "cuenta_nueva";
+
   if (fuzzyPhrase(words, ["cerrar ciclo"])) return "corte";
-  if (isRetiroWord(words[0])) return "retiro";
+  if (isRetiroWord(first)) return "retiro";
 
   return null;
 }
