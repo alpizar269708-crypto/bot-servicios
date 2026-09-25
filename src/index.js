@@ -72,7 +72,7 @@ app.get("/pairing", async (req, res) => {
 
 app.get("/", (req, res) => {
   res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-  res.send(`<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="cache-control" content="no-cache"><title>Bot de Servicios</title><style>body{font-family:Arial,sans-serif;text-align:center;background:#f5f5f5;margin:0;padding:30px;color:#222}.card{max-width:650px;margin:auto;background:#fff;padding:28px;border-radius:16px;box-shadow:0 4px 18px rgba(0,0,0,.12)}h1{font-size:28px}.qr{width:min(500px,90vw);height:auto;border:1px solid #ddd;border-radius:12px;padding:10px;background:#fff}.ok{font-size:22px;padding:35px;color:#16803c}.wait{font-size:20px;padding:45px}.code{font-size:34px;font-weight:bold;letter-spacing:6px;padding:25px;background:#f0f0f0;border-radius:12px;margin:20px 0}small{color:#777}</style></head><body><div class="card"><h1>🔌 Bot de Servicios</h1><h2>Vinculación de WhatsApp</h2><p>Elige cómo quieres vincular el bot.</p><div id="status" class="wait">⏳ Conectando con WhatsApp...</div></div><script>
+  res.send(`<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="cache-control" content="no-cache"><title>Bot de Servicios</title><style>body{font-family:Arial,sans-serif;text-align:center;background:#f5f5f5;margin:0;padding:30px;color:#222}.card{max-width:650px;margin:auto;background:#fff;padding:28px;border-radius:16px;box-shadow:0 4px 18px rgba(0,0,0,.12)}h1{font-size:28px}.qr{width:min(500px,90vw);height:auto;border:1px solid #ddd;border-radius:12px;padding:10px;background:#fff}.ok{font-size:22px;padding:35px;color:#16803c}.wait{font-size:20px;padding:45px}.code{font-size:34px;font-weight:bold;letter-spacing:6px;padding:25px;background:#f0f0f0;border-radius:12px;margin:20px 0}small{color:#777}</style></head><body><div class="card"><h1>🔌 Bot de Servicios</h1><h2>Vinculación de WhatsApp</h2><p>Elige cómo quieres vincular el bot.</p><div class="buttons"><button class="btn" onclick="showQR()">📱 Vincular con QR</button><button class="btn" onclick="showPhone()">🔐 Vincular con número de teléfono</button></div><div id="status" class="wait">👆 Elige una opción para vincular WhatsApp.</div></div><script>
 async function update(){
   try{
     const r=await fetch("/status?_"+Date.now(),{cache:"no-store"});
@@ -763,18 +763,7 @@ async function start() {
       }
     });
 
-    if (PAIRING_PHONE && !state.creds.registered) {
-      setTimeout(async () => {
-        try {
-          const code = await sock.requestPairingCode(PAIRING_PHONE);
-          currentPairingCode = code;
-          currentQR = null;
-          console.log(`🔐 Código de vinculación: ${code}`);
-        } catch (error) {
-          console.error("❌ No se pudo obtener el código de vinculación:", error?.message || error);
-        }
-      }, 5000);
-    }
+
   } catch (error) {
     starting = false;
     console.error("❌ Error iniciando WhatsApp:", error?.message || error);
