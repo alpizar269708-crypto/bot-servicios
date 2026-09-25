@@ -823,7 +823,7 @@ async function handleMessage(msg) {
           dateStyle: "short",
           timeStyle: "short"
         }) + " — " + money(x.amount)
-      ).join("\\n");
+      ).join("\n");
 
       return (i + 1) + ". 👤 *" + g.name + "* — " + money(g.total) + "\\n" + details;
     }).join("\\n\\n");
@@ -902,7 +902,7 @@ async function handleMessage(msg) {
     }
 
     await send(jid,
-      "✅ *PAGO REGISTRADO*\\n" +
+      "✅ *PAGO REGISTRADO*\n" +
       "👤 " + result.person.name + "\\n" +
       "💵 " + money(result.total) + "\\n" +
       "🧾 " + result.count + " servicio" + (result.count === 1 ? "" : "s")
