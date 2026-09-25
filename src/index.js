@@ -43,8 +43,49 @@ let loginMode = null;
 let loginPhone = "";
 
 const app = express();
+app.use(express.urlencoded({ extended: true }));
 const PORT = process.env.PORT || 3000;
 
+function panelStatus() {
+  return {
+    connected: botConnected,
+    qr: currentQR,
+    pairingCode: currentPairingCode
+  };
+}
+
+app.get("/", (req, res) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  if (botConnected) return res.send("<div style=\"font-family:Arial;text-align:center;margin-top:50px\"><h2>🤖 Bot de WhatsApp activo</h2><p>El bot ya está vinculado y trabajando en el servidor.</p></div>");
+  res.send([
+    "<!doctype html>",
+    "<html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Vincular Bot</title></head>",
+    "<body style=\"font-family:Arial;padding:20px;max-width:600px;margin:auto;text-align:center\">",
+    "<h2>🔌 Vincular Bot de WhatsApp</h2>",
+    "<form action=\"/iniciar\" method=\"POST\" style=\"text-align:left;background:#f9f9f9;padding:20px;border-radius:10px;border:1px solid #ddd\">",
+    "<p><b>1. Elige el método de inicio de sesión:</b></p>",
+    "<label><input type=\"radio\" name=\"metodo\" value=\"1\" checked> 📱 Código QR</label><br><br>",
+    "<label><input type=\"radio\" name=\"metodo\" value=\"2\"> 🔢 Código de 8 dígitos</label><br><br>",
+    "<p><b>2. Si elegiste 8 dígitos, ingresa tu número (código país + número, ej. 525512345678):</b></p>",
+    "<input type=\"text\" name=\"numero\" inputmode=\"numeric\" autocomplete=\"tel\" placeholder=\"Ej: 525512345678\" style=\"padding:10px;width:100%;box-sizing:border-box;border-radius:5px;border:1px solid #ccc\"><br><br>",
+    "<button type=\"submit\" style=\"padding:12px 20px;background:#25D366;color:white;border:none;cursor:pointer;font-size:16px;border-radius:5px;width:100%\">Generar Código</button>",
+    "</form></body></html>"
+  ].join(""));
+});
+
+app.post("/iniciar", (req, res) => {
+  if (botConnected || starting || sock) return res.send("<h2 style=\"font-family:Arial;text-align:center;margin-top:50px\">El bot ya está arrancando o ya está vinculado.</h2>");
+  const metodo = req.body.metodo;
+  const numero = req.body.numero ? String(req.body.numero).replace(/[^0-9]/g, "") : "";
+  loginMode = metodo === "2" ? "phone" : "qr";
+  loginPhone = numero;
+  start(loginMode, loginPhone, htmlRespuesta => res.send(htmlRespuesta));
+});
+
+app.get("/status", (req, res) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.json(panelStatus());
+});
 function panelStatus() {
   return {
     connected: botConnected,
@@ -819,116 +860,48 @@ async function resetWhatsAppAuth() {
   console.log("🧹 Sesión de WhatsApp inválida eliminada.");
 }
 
-async function start(mode = "qr", phone = "") {
-  if (starting || sock) return;
+async function start(mode = "qr", phone = "", onCodeReady = null) {
+  if (starting || sock || botConnected) return;
   starting = true;
   loginMode = mode;
   loginPhone = phone;
+  currentQR = null;
+  currentPairingCode = null;
 
   try {
     if (!authState) authState = await useMongoDBAuthState("sesion");
     const { state, saveCreds } = authState;
-    const latest = await fetchLatestBaileysVersion();
 
+    // Flujo de inicio copiado del bot-completobeto.
     sock = makeWASocket({
-      version: latest.version,
-      logger,
       auth: state,
+      printQRInTerminal: false,
+      logger: pino({ level: "silent" }),
       browser: Browsers.ubuntu("Chrome"),
       syncFullHistory: false,
       generateHighQualityLinkPreview: false,
       markOnlineOnConnect: true,
-      printQRInTerminal: false,
       getMessage: async () => ({ conversation: "" })
     });
 
-    sock.ev.on("creds.update", saveCreds);
-
-    if (mode === "phone" && !state.creds.me && phone) {
-      setTimeout(async () => {
-        try {
-          requestedPairingPhone = phone;
-          const code = await generatePairingCode();
-          if (code) console.log("🔢 Código de vinculación listo para mostrar en el panel.");
-        } catch (e) {
-          console.error("❌ Error al generar código de vinculación:", e?.message || e);
-        }
-      }, 3000);
+    sock.ev.on("creds.update", saveC(async () => {
+  try {
+    await mongo.connect();
+    db = mongo.db(DB_NAME);
+    await mongoose.connect(MONGO_URI);
+    authState = await useMongoDBAuthState("sesion");
+    await ensureIndexes();
+    await ensureAccount();
+    console.log("✅ MongoDB conectado.");
+    if (authState.state.creds.me) {
+      console.log("✅ Sesión previa detectada. Arrancando bot automáticamente...");
+      await start("qr", "");
+    } else {
+      console.log("⚠️ No hay sesión. Entra a la página web para vincular el bot.");
     }
-
-    sock.ev.on("connection.update", async update => {
-      const connection = update.connection;
-
-      if (update.qr && loginMode === "qr") {
-        currentQR = update.qr;
-        currentPairingCode = null;
-        console.log("📱 QR generado — disponible únicamente en el panel web.");
-      }
-
-      if (connection === "open") {
-        starting = false;
-        botConnected = true;
-        currentQR = null;
-        currentPairingCode = null;
-        requestedPairingPhone = null;
-        pairingInProgress = false;
-        console.log("✅ WhatsApp conectado.");
-
-        if (OWNER_PHONE) {
-          await send(OWNER_PHONE + "@s.whatsapp.net", "🤖 Bot de servicios conectado.\n\nEscribe " + PREFIX + "menu");
-        }
-      }
-
-      if (connection === "close") {
-        starting = false;
-        botConnected = false;
-        sock = null;
-
-        const code = update.lastDisconnect?.error?.output?.statusCode;
-        console.log(`⚠️ WhatsApp desconectado (código ${code ?? "desconocido"}). Se reintentará.`);
-
-        if (code === DisconnectReason.loggedOut) {
-          currentQR = null;
-          currentPairingCode = null;
-          requestedPairingPhone = null;
-          console.log("🔴 WhatsApp reportó SESIÓN CERRADA (loggedOut). Las credenciales se conservan en MongoDB.");
-          return;
-        }
-
-        setTimeout(() => start(loginMode || "qr", loginPhone || ""), 3000);
-      }
-    });
-
-    sock.ev.on("messages.upsert", async event => {
-      for (const msg of event.messages) {
-        try {
-          await handleMessage(msg);
-        } catch (error) {
-          console.error("❌ Error procesando mensaje:", error?.message || error);
-        }
-      }
-    });
+    app.listen(PORT, "0.0.0.0", () => console.log("🌐 Servidor Web interactivo escuchando en el puerto " + PORT));
   } catch (error) {
-    starting = false;
-    sock = null;
-    console.error("❌ Error iniciando WhatsApp:", error?.message || error);
-    setTimeout(() => start(loginMode || mode, loginPhone || phone), 5000);
+    console.error("❌ Error inicializando el bot:", error?.message || error);
+    process.exit(1);
   }
-}
-
-(async () => {
-  await mongo.connect();
-  db = mongo.db(DB_NAME);
-  await mongoose.connect(MONGO_URI);
-  authState = await useMongoDBAuthState("sesion");
-  await ensureIndexes();
-  await ensureAccount();
-  logger.info("MongoDB conectado.");
-
-  if (authState.state.creds.me) {
-    console.log("✅ Sesión previa detectada. Arrancando bot automáticamente...");
-    await start("qr", "");
-  } else {
-    console.log("⚠️ No hay sesión de WhatsApp. Entra al panel web para vincular el bot.");
-  }
-})();
+})();;
