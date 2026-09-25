@@ -72,7 +72,37 @@ app.get("/pairing", async (req, res) => {
 
 app.get("/", (req, res) => {
   res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-  res.send(`<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="cache-control" content="no-cache"><title>Bot de Servicios</title><style>body{font-family:Arial,sans-serif;text-align:center;background:#f5f5f5;margin:0;padding:30px;color:#222}.card{max-width:650px;margin:auto;background:#fff;padding:28px;border-radius:16px;box-shadow:0 4px 18px rgba(0,0,0,.12)}h1{font-size:28px}.qr{width:min(500px,90vw);height:auto;border:1px solid #ddd;border-radius:12px;padding:10px;background:#fff}.ok{font-size:22px;padding:35px;color:#16803c}.wait{font-size:20px;padding:45px}.code{font-size:34px;font-weight:bold;letter-spacing:6px;padding:25px;background:#f0f0f0;border-radius:12px;margin:20px 0}small{color:#777}</style></head><body><div class="card"><h1>🔌 Bot de Servicios</h1><h2>Vinculación de WhatsApp</h2><p>Elige cómo quieres vincular el bot.</p><div class="buttons"><button class="btn" onclick="showQR()">📱 Vincular con QR</button><button class="btn" onclick="showPhone()">🔐 Vincular con número de teléfono</button></div><div id="status" class="wait">👆 Elige una opción para vincular WhatsApp.</div></div><script>
+  res.send(`<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="cache-control" content="no-cache"><title>Bot de Servicios</title><style>body{font-family:Arial,sans-serif;text-align:center;background:#f5f5f5;margin:0;padding:30px;color:#222}.card{max-width:650px;margin:auto;background:#fff;padding:28px;border-radius:16px;box-shadow:0 4px 18px rgba(0,0,0,.12)}h1{font-size:28px}.qr{width:min(500px,90vw);height:auto;border:1px solid #ddd;border-radius:12px;padding:10px;background:#fff}.ok{font-size:22px;padding:35px;color:#16803c}.wait{font-size:20px;padding:45px}.code{font-size:34px;font-weight:bold;letter-spacing:6px;padding:25px;background:#f0f0f0;border-radius:12px;margin:20px 0}.buttons{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:20px 0}.btn{border:0;border-radius:10px;padding:14px 18px;font-size:16px;cursor:pointer;background:#222;color:#fff}.btn:hover{opacity:.85}small{color:#777}</style></head><body><div class="card"><h1>🔌 Bot de Servicios</h1><h2>Vinculación de WhatsApp</h2><p>Elige cómo quieres vincular el bot.</p><div class="buttons"><button class="btn" onclick="showQR()">📱 Vincular con QR</button><button class="btn" onclick="showPhone()">🔐 Vincular con número de teléfono</button></div><div id="status" class="wait">👆 Elige una opción para vincular WhatsApp.</div></div><script>
+let selectedMode = null;
+
+async function showQR(){
+  selectedMode = "qr";
+  const el = document.getElementById("status");
+  el.className = "wait";
+  el.innerHTML = "⏳ Preparando vinculación por QR...";
+  await update();
+}
+
+async function showPhone(){
+  selectedMode = "phone";
+  const el = document.getElementById("status");
+  el.className = "wait";
+  el.innerHTML = "⏳ Generando código de vinculación...";
+  try{
+    const r = await fetch("/pairing?_="+Date.now(), {cache:"no-store"});
+    const data = await r.json();
+    if(!data.ok){
+      el.className = "wait";
+      el.innerHTML = "❌ " + (data.error || "No se pudo generar el código.");
+      return;
+    }
+    await update();
+  }catch(e){
+    el.className = "wait";
+    el.innerHTML = "❌ No se pudo contactar al bot.";
+  }
+}
+
 async function update(){
   try{
     const r=await fetch("/status?_"+Date.now(),{cache:"no-store"});
