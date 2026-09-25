@@ -1224,21 +1224,29 @@ async function handleMessage(msg) {
       }
     );
 
-    const services35 = s.rows.filter(x => Number(x.amount) === 35);
-    const services250 = s.rows.filter(x => Number(x.amount) === 250);
+    const byAmount = new Map();
 
-    const total35 = services35.reduce((sum, x) => sum + Number(x.amount || 0), 0);
-    const total250 = services250.reduce((sum, x) => sum + Number(x.amount || 0), 0);
+    for (const x of s.rows) {
+      const amount = Number(x.amount || 0);
+      if (!byAmount.has(amount)) byAmount.set(amount, 0);
+      byAmount.set(amount, byAmount.get(amount) + 1);
+    }
+
+    const serviceLines = [...byAmount.entries()]
+      .sort((a, b) => b[0] - a[0])
+      .map(([amount, count]) =>
+        money(amount) + "*" + count + "=" + money(amount * count)
+      )
+      .join("\n");
 
     await send(jid,
       "✂️ *CORTE*\n\n" +
-      "📋 Servicios: *" + s.rows.length + "*\n" +
-      "🔹 $35: *" + services35.length + "* servicios — *" + money(total35) + "*\n" +
-      "🔹 $250: *" + services250.length + "* servicios — *" + money(total250) + "*\n" +
+      "📋 *Servicios:*\n" +
+      serviceLines + "\n" +
       "💰 Suma: *" + money(s.total) + "*\n" +
       "💸 Retiros: *" + money(s.withdrawnTotal) + "*\n" +
       "⏳ Pendiente: *" + money(s.pendingTotal) + "*\n" +
-      "✅ Pagado: *" + money(s.paidTotal) + "*\n" +
+      "✅ Pagado: *" + money(s.paidTotal) + "*\n\n" +
       "📊 Final: *" + money(s.netTotal) + "*"
     );
     return;
