@@ -1,6 +1,20 @@
 
 require("dotenv").config();
 
+// libsignal (usado internamente por Baileys) imprime directamente en console.log
+// detalles enormes de SessionEntry. Los filtramos sin ocultar los logs normales del bot.
+const originalConsoleLog = console.log;
+console.log = (...args) => {
+  const first = String(args[0] || "");
+  if (
+    first.startsWith("Closing session: SessionEntry") ||
+    first.startsWith("Removing old closed session: SessionEntry") ||
+    first.startsWith("Closing stale open session") ||
+    first.startsWith("Closing open session in favor of incoming prekey bundle")
+  ) return;
+  originalConsoleLog(...args);
+};
+
 const {
   default: makeWASocket,
   DisconnectReason,
