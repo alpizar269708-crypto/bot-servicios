@@ -238,11 +238,7 @@ function phoneFromJid(jid) {
 }
 
 function money(n) {
-  return new Intl.NumberFormat("es-MX", {
-    style: "currency",
-    currency: "MXN",
-    minimumFractionDigits: 2
-  }).format(Number(n || 0));
+  return "$" + Math.round(Number(n || 0)).toLocaleString("es-MX");
 }
 
 function parseAmount(v) {
