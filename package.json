@@ -1,0 +1,16 @@
+{
+  "name": "bot-servicios",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bot de servicios para WhatsApp con Baileys y MongoDB",
+  "main": "src/index.js",
+  "scripts": { "start": "node src/index.js" },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.18",
+    "dotenv": "^16.6.1",
+    "mongodb": "^6.19.0",
+    "pino": "^9.9.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
