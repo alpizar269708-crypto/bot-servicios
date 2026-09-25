@@ -916,10 +916,9 @@ async function handleMessage(msg) {
     const body = [...grouped.values()].map((g, i) => {
       total += g.total;
       const details = g.rows.map(x =>
-        "   📅 " + new Date(x.createdAt).toLocaleString("es-MX", {
+        "   📅 " + new Date(x.createdAt).toLocaleDateString("es-MX", {
           timeZone: "America/Mexico_City",
-          dateStyle: "short",
-          timeStyle: "short"
+          dateStyle: "short"
         }) + " — " + money(x.amount)
       ).join("\n");
 
