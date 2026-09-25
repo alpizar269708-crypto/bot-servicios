@@ -131,15 +131,75 @@ app.get("/", async (req, res) => {
   res.send(html);
 });
 
-app.post("/iniciar", (req, res) => {
-  if (botConnected || starting || sock) {
-    return res.send('<h2 style="font-family: Arial; text-align: center; margin-top: 50px;">El bot ya está arrancando.</h2>');
-  }
+app.post("/iniciar", async (req, res) => {
   const { metodo, numero } = req.body;
   const numeroLimpio = numero ? String(numero).replace(/[^0-9]/g, "") : "";
+
   loginMode = metodo === "2" ? "phone" : "qr";
   loginPhone = numeroLimpio;
-  start(loginMode, loginPhone, htmlRespuesta => res.send(htmlRespuesta));
+
+  if (botConnected) {
+    return res.send('<h2 style="font-family: Arial; text-align: center; margin-top: 50px;">✅ El bot ya está vinculado y activo.</h2>');
+  }
+
+  if (loginMode === "phone") {
+    if (numeroLimpio.length < 10) {
+      return res.send('<h2 style="font-family: Arial; text-align: center; margin-top: 50px;">❌ Escribe un número válido con código de país.</h2>');
+    }
+
+    requestedPairingPhone = numeroLimpio;
+    currentPairingCode = null;
+
+    try {
+      if (!sock) {
+        await new Promise(resolve => {
+          start("phone", numeroLimpio, htmlRespuesta => {
+            res.send(htmlRespuesta);
+            resolve();
+          });
+        });
+        return;
+      }
+
+      const code = await generatePairingCode();
+      if (code) {
+        const codigoFormat = code.match(/.{1,4}/g)?.join("-") || code;
+        return res.send(`
+          <div style="font-family: Arial; text-align: center; margin-top: 50px;">
+            <h2>🔢 Tu código de vinculación es:</h2>
+            <h1 style="font-size: 48px; letter-spacing: 5px; color: #25D366; background: #eee; display: inline-block; padding: 10px 20px; border-radius: 10px;">${codigoFormat}</h1>
+            <p>Abre WhatsApp en tu teléfono, ve a <b>Dispositivos Vinculados &gt; Vincular con número de teléfono</b>, e ingresa este código.</p>
+          </div>
+        `);
+      }
+
+      return res.send('<h2 style="font-family: Arial; text-align: center; margin-top: 50px;">⏳ WhatsApp está iniciando. Espera unos segundos y vuelve a generar el código.</h2>');
+    } catch (error) {
+      console.error("❌ Error en inicio por número:", error?.message || error);
+      return res.send('<h2 style="font-family: Arial; text-align: center; margin-top: 50px;">❌ No se pudo generar el código. Revisa el log de Render.</h2>');
+    }
+  }
+
+  if (sock) {
+    if (currentQR) {
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(currentQR)}`;
+      return res.send(`
+        <div style="font-family: Arial; text-align: center; margin-top: 50px;">
+          <h2>📱 Escanea este código QR</h2>
+          <img src="${qrUrl}" alt="QR Code" style="border: 1px solid #ccc; border-radius: 10px; padding: 10px;" />
+          <p>Abre WhatsApp &gt; Dispositivos Vinculados &gt; Vincular un dispositivo.</p>
+        </div>
+      `);
+    }
+    return res.send('<h2 style="font-family: Arial; text-align: center; margin-top: 50px;">⏳ WhatsApp está iniciando. Vuelve a intentarlo en unos segundos.</h2>');
+  }
+
+  return await new Promise(resolve => {
+    start("qr", "", htmlRespuesta => {
+      res.send(htmlRespuesta);
+      resolve();
+    });
+  });
 });
 
 app.listen(Number(PORT), "0.0.0.0", () => console.log(`🌐 Panel listo en puerto ${PORT}`));
