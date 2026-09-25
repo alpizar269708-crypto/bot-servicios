@@ -14,6 +14,7 @@ const {
 const { MongoClient } = require("mongodb");
 const pino = require("pino");
 const qrcode = require("qrcode-terminal");
+const express = require("express");
 
 const MONGO_URI = process.env.MONGO_URI;
 const DB_NAME = process.env.MONGO_DB_NAME || "bot_servicios";
@@ -32,6 +33,24 @@ const mongo = new MongoClient(MONGO_URI);
 let db;
 let sock;
 let starting = false;
+let currentQR = null;
+let botConnected = false;
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get("/", (req, res) => {
+  const status = botConnected
+    ? `<div class="ok">✅ Bot vinculado correctamente y en línea.</div>`
+    : currentQR
+      ? `<img src="https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(currentQR)}" alt="Código QR" class="qr">
+         <p>📱 Abre WhatsApp → Dispositivos vinculados → Vincular un dispositivo.</p>`
+      : `<div class="wait">⏳ Esperando a que WhatsApp genere el código QR...<br><small>Actualiza esta página en unos segundos.</small></div>`;
+
+  res.send(`<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="3"><title>Vincular Bot de Servicios</title><style>body{font-family:Arial,sans-serif;text-align:center;background:#f5f5f5;margin:0;padding:30px;color:#222}.card{max-width:650px;margin:auto;background:#fff;padding:28px;border-radius:16px;box-shadow:0 4px 18px rgba(0,0,0,.12)}h1{font-size:28px}.qr{width:min(500px,90vw);height:auto;border:1px solid #ddd;border-radius:12px;padding:10px;background:#fff}.ok{font-size:22px;padding:35px;color:#16803c}.wait{font-size:20px;padding:45px}small{color:#777}</style></head><body><div class="card"><h1>🔌 Bot de Servicios</h1><h2>Vinculación de WhatsApp</h2>${status}</div></body></html>`);
+});
+
+app.listen(PORT, () => console.log(`🌐 Panel de vinculación escuchando en el puerto ${PORT}`));
 
 function cleanPhone(v) {
   return String(v || "").replace(/\D/g, "");
@@ -662,12 +681,15 @@ async function start() {
       const connection = update.connection;
 
       if (update.qr) {
-        console.log("\nESCANEA ESTE QR EN WHATSAPP:\n");
+        currentQR = update.qr;
+        console.log("\n📱 QR disponible en el panel web de Render.\n");
         qrcode.generate(update.qr, { small: true });
       }
 
       if (connection === "open") {
         starting = false;
+        botConnected = true;
+        currentQR = null;
         logger.info("WhatsApp conectado.");
 
         if (OWNER_PHONE) {
@@ -680,6 +702,7 @@ async function start() {
 
       if (connection === "close") {
         starting = false;
+        botConnected = false;
 
         const code = update.lastDisconnect?.error?.output?.statusCode;
         const retry = code !== DisconnectReason.loggedOut;
