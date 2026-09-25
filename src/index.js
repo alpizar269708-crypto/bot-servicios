@@ -321,6 +321,7 @@ async function collections() {
     services: db.collection(COLLECTION + "_services"),
     payments: db.collection(COLLECTION + "_payments"),
     transfers: db.collection(COLLECTION + "_transfers"),
+    withdrawals: db.collection(COLLECTION + "_withdrawals"),
     auth: db.collection(COLLECTION + "_auth")
   };
 }
@@ -533,6 +534,9 @@ async function servicesSummary() {
   }).sort({ createdAt: 1 }).toArray();
 
   const total = rows.reduce((s, x) => s + Number(x.amount || 0), 0);
+  const withdrawalRows = await c.withdrawals.find({ accountNumber: account.number }).sort({ createdAt: 1 }).toArray();
+  const withdrawnTotal = withdrawalRows.reduce((s, x) => s + Number(x.amount || 0), 0);
+  const netTotal = total - withdrawnTotal;
   const pending = rows.filter(x => x.status === "pending");
   const paid = rows.filter(x => x.status === "paid");
 
@@ -540,6 +544,9 @@ async function servicesSummary() {
     account,
     rows,
     total,
+    withdrawnTotal,
+    netTotal,
+    withdrawalRows,
     pendingTotal: pending.reduce((s, x) => s + Number(x.amount || 0), 0),
     paidTotal: paid.reduce((s, x) => s + Number(x.amount || 0), 0)
   };
@@ -605,6 +612,9 @@ function menu() {
     "",
     "💵 *Registrar pago*",
     "   pag Juan",
+    "",
+    "💸 *Registrar retiro*",
+    "   retiro 5000",
     "",
     "🔄 *Registrar transferencia*",
     "   transferencia Juan 500",
@@ -708,7 +718,9 @@ async function handleMessage(msg) {
       "📋 *SERVICIOS — CUENTA " + s.account.number + "*\n\n" +
       body + "\n\n" +
       "🔢 Cantidad total: *" + s.rows.length + "*\n" +
-      "💰 Suma total: *" + money(s.total) + "*\n" +
+      "💰 Suma: *" + money(s.total) + "*\n" +
+      "💸 Retiros: *" + money(s.withdrawnTotal) + "*\n" +
+      "📊 Disponible: *" + money(s.netTotal) + "*\n" +
       "⏳ Pendiente: *" + money(s.pendingTotal) + "*\n" +
       "✅ Pagado: *" + money(s.paidTotal) + "*"
     );
@@ -799,12 +811,43 @@ async function handleMessage(msg) {
     return;
   }
 
-  if (command === "cuenta_nueva") {
-    if (!isOwner(jid)) {
-      await send(jid, "⛔ Solo el propietario puede iniciar una cuenta nueva.");
+  if (command === "retiro") {
+    let args = text.trim();
+    if (args.startsWith(PREFIX)) args = args.slice(PREFIX.length).trim();
+    const rest = args.split(/\s+/).slice(1).join(" ").trim();
+    const a = amountFrom(rest);
+
+    if (!a) {
+      await send(jid, "❌ Escribe: retiro 5000");
       return;
     }
 
+    const s = await servicesSummary();
+
+    if (a.amount > s.netTotal) {
+      await send(jid, "❌ El retiro supera el total disponible de " + money(s.netTotal) + ".");
+      return;
+    }
+
+    const now = new Date();
+    await c.withdrawals.insertOne({
+      accountNumber: s.account.number,
+      amount: a.amount,
+      createdAt: now,
+      jid
+    });
+
+    const updated = await servicesSummary();
+    await send(jid,
+      "💸 *RETIRO*\n" +
+      "💵 " + money(a.amount) + "\n" +
+      "📅 " + now.toLocaleString("es-MX", { timeZone: "America/Mexico_City" }) + "\n" +
+      "📊 Disponible: " + money(updated.netTotal)
+    );
+    return;
+  }
+
+  if (command === "cuenta_nueva") {
     let args = text.trim();
     if (args.startsWith(PREFIX)) args = args.slice(PREFIX.length).trim();
     const rest = args.split(/\s+/).slice(2).join(" ");
@@ -812,10 +855,10 @@ async function handleMessage(msg) {
     const account = await newAccount(a ? a.amount : 0);
 
     await send(jid,
-      "🆕 *CUENTA NUEVA*\n\n" +
-      "Cuenta: *" + account.number + "*\n" +
-      "Monto inicial: *" + money(account.initialAmount) + "*\n\n" +
-      "📚 El historial anterior se conserva."
+      "🆕 *CUENTA NUEVA*\n" +
+      "📁 Cuenta: *" + account.number + "*\n" +
+      "💵 Inicio: *" + money(account.initialAmount) + "*\n" +
+      "📚 La cuenta anterior quedó cerrada y su historial se conserva."
     );
     return;
   }
