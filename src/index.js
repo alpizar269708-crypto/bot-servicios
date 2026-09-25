@@ -271,22 +271,32 @@ function commandOf(text) {
   let t = norm(text);
   if (t.startsWith(PREFIX)) t = t.slice(PREFIX.length).trim();
 
-  const exact = {
-    menu: "menu",
-    ayuda: "menu",
-    activarbotservicios: "activar",
-    deudores: "deudores",
-    pagados: "pagados",
-    listaservicios: "listaservicios"
-  };
+  const words = t.split(/\\s+/).filter(Boolean);
+  if (!words.length) return null;
 
-  if (exact[t]) return exact[t];
-  if (t === "pag" || t.startsWith("pag ")) return "pag";
-  if (t === "pago" || t.startsWith("pago ")) return "pag";
-  if (t === "transferencia" || t.startsWith("transferencia ")) return "transferencia";
-  if (t === "cuenta nueva" || t.startsWith("cuenta nueva ")) return "cuenta_nueva";
-  if (t === "cuentanueva" || t.startsWith("cuentanueva ")) return "cuenta_nueva";
-  if (t === "cerrar ciclo" || t.startsWith("cerrar ciclo ")) return "cerrar_ciclo";
+  const first = words[0];
+  const joined = words.join(" ");
+
+  if (joined === "menu" || joined === "ayuda") return "menu";
+  if (joined === "activarbotservicios") return "activar";
+  if (joined === "deudores" || joined === "deudor") return "deudores";
+  if (joined === "pagados" || joined === "pagado") return "pagados";
+  if (joined === "listaservicios" || joined === "lista servicios" || joined === "lista servicio") return "listaservicios";
+
+  // Pago: cualquier palabra que empiece con P.
+  // Funciona antes o después del nombre: "pag Juan", "Juan pag", "p Juan", "Juan p", etc.
+  if (/^p/i.test(first) || words.some(w => /^p$/i.test(w) || /^pag/i.test(w))) return "pag";
+
+  // Transferencia: acepta transferencia/transfer/transf y abreviaciones que empiecen con T.
+  if (/^t/i.test(first) || words.some(w => /^transfer/i.test(w) || /^transf/i.test(w))) return "transferencia";
+
+  if (joined === "cuenta nueva" || joined === "cuentanueva" || /^cuenta nueva\\s+/.test(joined) || /^cuentanueva\\s+/.test(joined)) {
+    return "cuenta_nueva";
+  }
+
+  if (joined === "cerrar ciclo" || /^cerrar ciclo\\s+/.test(joined)) return "cerrar_ciclo";
+
+  if (/^retiro(?:\\s|$)/.test(joined) || /^r(?:\\s|$)/.test(joined)) return "retiro";
 
   return null;
 }
@@ -307,6 +317,40 @@ function quotedText(msg) {
     q.videoMessage?.caption ||
     ""
   ).trim();
+}
+
+function quotedServiceName(text) {
+  const t = String(text || "").trim();
+  if (!t) return "";
+
+  // Mensajes del propio bot.
+  const botName = t.match(/(?:👤|Usuario:?)[\\s:*]*([^\\n]+?)(?=\\n|💵|$)/i);
+  if (botName) return botName[1].replace(/[*_]/g, "").trim();
+
+  // Mensajes humanos tipo "Juan 250" o "250 Juan".
+  const a = amountFrom(t);
+  if (a) return cleanName(t, a.raw);
+
+  return t.replace(/^!/, "").trim();
+}
+
+function paymentNameFromText(text) {
+  let t = String(text || "").trim();
+  if (t.startsWith(PREFIX)) t = t.slice(PREFIX.length).trim();
+
+  const words = t.split(/\\s+/).filter(Boolean);
+  if (!words.length) return "";
+
+  // Quita cualquier palabra de pago que empiece con P.
+  t = words.filter(w => !/^p/i.test(w)).join(" ").trim();
+
+  // Quita "pago/pagado/etc." aunque aparezcan en medio.
+  t = t.replace(/\\b(pago|pagado|pagar|pag|paf|p)\\b/gi, " ").replace(/\\s+/g, " ").trim();
+
+  const a = amountFrom(t);
+  if (a) t = cleanName(t, a.raw);
+
+  return t.trim();
 }
 
 function isOwner(jid) {
@@ -559,7 +603,8 @@ async function addService(name, amount, jid, transfer) {
 
 async function servicesSummary() {
   const account = await ensureAccount();
-  const { services } = await collections();
+  const c = await collections();
+  const { services } = c;
 
   const rows = await services.find({
     accountNumber: account.number
@@ -643,13 +688,13 @@ function menu() {
     "   Juan 250",
     "",
     "💵 *Registrar pago*",
-    "   pag Juan",
+    "   pag Juan / p Juan / Juan pag",
     "",
     "💸 *Registrar retiro*",
     "   retiro 5000",
     "",
     "🔄 *Registrar transferencia*",
-    "   transferencia Juan 500",
+    "   transferencia Juan 500 / Juan transferencia 500",
     "",
     "👥 *Consultar deudores*",
     "   deudores",
@@ -658,7 +703,7 @@ function menu() {
     "   pagados",
     "",
     "📋 *Ver servicios*",
-    "   listaservicios",
+    "   listaservicios / lista servicios",
     "",
     "🆕 *Nueva cuenta*",
     "   cuenta nueva 5000",
@@ -718,21 +763,47 @@ async function handleMessage(msg) {
   }
 
   if (command === "deudores") {
-    const rows = await debtors();
+    const { services } = await collections();
+    const rows = await services.find({ status: "pending" }).sort({ createdAt: 1 }).toArray();
+
     if (!rows.length) {
       await send(jid, "✅ No hay deudores pendientes.");
       return;
     }
 
-    let total = 0;
-    const body = rows.map((x, i) => {
-      total += Number(x.total || 0);
-      return (i + 1) + ". " + x.name + " — " + money(x.total) +
-        " (" + x.count + " servicio" + (x.count === 1 ? "" : "s") + ")";
-    }).join("\n");
+    const grouped = new Map();
+    for (const x of rows) {
+      const key = String(x.personId);
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          name: x.personName,
+          total: 0,
+          rows: []
+        });
+      }
+      const g = grouped.get(key);
+      g.total += Number(x.amount || 0);
+      g.rows.push(x);
+    }
 
-    await send(jid, "👥 *DEUDORES*\n\n" + body +
-      "\n\n💰 Total pendiente: *" + money(total) + "*");
+    let total = 0;
+    const body = [...grouped.values()].map((g, i) => {
+      total += g.total;
+      const details = g.rows.map(x =>
+        "   📅 " + new Date(x.createdAt).toLocaleString("es-MX", {
+          timeZone: "America/Mexico_City",
+          dateStyle: "short",
+          timeStyle: "short"
+        }) + " — " + money(x.amount)
+      ).join("\\n");
+
+      return (i + 1) + ". 👤 *" + g.name + "* — " + money(g.total) + "\\n" + details;
+    }).join("\\n\\n");
+
+    await send(jid,
+      "👥 *DEUDORES*\\n\\n" + body +
+      "\\n\\n💰 Total pendiente: *" + money(total) + "*"
+    );
     return;
   }
 
@@ -783,29 +854,30 @@ async function handleMessage(msg) {
   if (command === "pag") {
     let args = text.trim();
     if (args.startsWith(PREFIX)) args = args.slice(PREFIX.length).trim();
-    args = args.split(/\s+/).slice(1).join(" ").trim();
 
-    // Si se respondió/citó un mensaje con "pag", usa el texto citado.
-    if (!args && quoted) args = quoted.replace(/^!/, "").trim();
+    // Acepta "pag Juan", "Juan pag", "p Juan", "Juan p", etc.
+    // Si se responde a cualquier mensaje de servicio, usa el nombre citado.
+    let name = paymentNameFromText(args);
+    if (!name && quoted) name = quotedServiceName(quoted);
 
-    if (!args) {
-      await send(jid, "❌ Escribe: pag Fulano o responde a un mensaje y escribe pag.");
+    if (!name) {
+      await send(jid, "❌ Escribe el nombre o responde al servicio y escribe cualquier comando de pago que empiece con P.");
       return;
     }
 
-    const result = await pay(args);
+    const result = await pay(name);
 
     if (!result.ok) {
       await send(jid, result.reason === "not_found"
-        ? "❌ No encuentro a *" + args + "*."
+        ? "❌ No encuentro a *" + name + "*."
         : "ℹ️ *" + result.person.name + "* no tiene servicios pendientes.");
       return;
     }
 
     await send(jid,
-      "✅ *PAGO REGISTRADO*\n" +
-      "👤 " + result.person.name + "\n" +
-      "💵 " + money(result.total) + "\n" +
+      "✅ *PAGO REGISTRADO*\\n" +
+      "👤 " + result.person.name + "\\n" +
+      "💵 " + money(result.total) + "\\n" +
       "🧾 " + result.count + " servicio" + (result.count === 1 ? "" : "s") + " liquidado" + (result.count === 1 ? "" : "s")
     );
     return;
@@ -855,6 +927,7 @@ async function handleMessage(msg) {
     }
 
     const s = await servicesSummary();
+    const c = await collections();
 
     if (a.amount > s.netTotal) {
       await send(jid, "❌ El retiro supera el total disponible de " + money(s.netTotal) + ".");
@@ -912,11 +985,6 @@ async function handleMessage(msg) {
   }
 
   if (command === "cerrar_ciclo") {
-    if (!isOwner(jid)) {
-      await send(jid, "⛔ Solo el propietario puede cerrar el ciclo.");
-      return;
-    }
-
     const s = await servicesSummary();
     const { accounts, cycles } = await collections();
     await accounts.updateOne(
@@ -932,6 +1000,8 @@ async function handleMessage(msg) {
           summary: {
             count: s.rows.length,
             total: s.total,
+            withdrawals: s.withdrawnTotal,
+            netTotal: s.netTotal,
             pending: s.pendingTotal,
             paid: s.paidTotal
           }
