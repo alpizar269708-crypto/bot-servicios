@@ -919,11 +919,16 @@ async function handleMessage(msg) {
 
   if (!text) return;
 
-  let command = commandOf(text);
   const quoted = quotedText(msg);
 
-  if (!command && quoted && /^\\s*\\d+\\s*$/.test(text) && /DEUDORES/i.test(quoted)) {
+  // Una respuesta numérica al mensaje de DEUDORES siempre significa
+  // seleccionar ese número para registrarlo como PAGADO.
+  // Tiene prioridad sobre comandos aproximados como "retiro".
+  let command;
+  if (quoted && /^\s*\d+\s*$/.test(text) && /DEUDORES/i.test(quoted)) {
     command = "deudoresp";
+  } else {
+    command = commandOf(text);
   }
 
   if (command === "activar") {
@@ -1068,26 +1073,53 @@ async function handleMessage(msg) {
       .replace(/\bdeudoresp\b/i, "")
       .trim();
 
-    // Si se responde al mensaje de DEUDORES y se escribe solo un número,
-    // ese número corresponde a la posición del deudor dentro de ese mensaje.
-    if (!argsText && quoted) {
+    // Respuesta al mensaje de DEUDORES:
+    // escribir solamente "2" paga exactamente al deudor #2
+    // que aparece en ESE mensaje.
+    if (quoted && /^\s*\d+\s*$/.test(text) && /DEUDORES/i.test(quoted)) {
+      const selectedNumber = Number(text.trim());
       const quotedLines = quoted.split(/\r?\n/);
-      const quotedNumber = quotedLines
-        .map(line => {
-          const m = line.match(/^\s*(\d+)\.\s*👤\s*\*?(.+?)\*?\s*[—-]\s*\$?([\d,]+)/);
-          return m ? { number: Number(m[1]), name: m[2].trim() } : null;
-        })
-        .filter(Boolean);
 
-      if (quotedNumber.length) {
-        // No hay número escrito; se mantiene vacío para que el bloque
-        // de abajo pueda usar el nombre si posteriormente se agrega lógica.
+      const selectedLine = quotedLines.find(line => {
+        const m = line.match(/^\s*(\d+)\.\s*👤\s*\*?(.+?)\*?\s*[—-]/);
+        return m && Number(m[1]) === selectedNumber;
+      });
+
+      if (!selectedLine) {
+        await send(jid, "❌ Ese número no existe en el mensaje de deudores.");
+        return;
       }
+
+      const match = selectedLine.match(/^\s*(\d+)\.\s*👤\s*\*?(.+?)\*?\s*[—-]/);
+      const selectedName = match
+        ? match[2].replace(/[*_]/g, "").trim()
+        : "";
+
+      if (!selectedName) {
+        await send(jid, "❌ No pude identificar al deudor seleccionado.");
+        return;
+      }
+
+      const result = await pay(selectedName);
+
+      if (!result.ok) {
+        await send(jid,
+          result.reason === "not_found"
+            ? "❌ No encuentro a *" + selectedName + "*."
+            : "ℹ️ *" + selectedName + "* no tiene servicios pendientes."
+        );
+        return;
+      }
+
+      await send(jid,
+        "✅ *PAGO REGISTRADO*\n" +
+        "👤 " + result.person.name + "\n" +
+        "💵 " + money(result.total) + "\n" +
+        "🧾 " + result.count + " servicio" + (result.count === 1 ? "" : "s")
+      );
+      return;
     }
 
-    // Para responder al mensaje de DEUDORES con "2", el parser general
-    // puede haber dejado command=null. En ese caso handleMessage convierte
-    // el número en un pago por posición antes de continuar.
     if (!argsText && /^\s*\d+\s*$/.test(text)) {
       argsText = text.trim();
     }
