@@ -1370,6 +1370,10 @@ async function start(mode = "qr", phone = "", onCodeReady = null) {
       auth: state,
       browser: Browsers.macOS("Desktop"),
       syncFullHistory: false,
+      // Este bot no necesita descargar historial de chats. Bloqueamos la
+      // sincronización automática de historial para evitar que WhatsApp
+      // muestre el aviso de "Sincronizando con WhatsApp..." en el teléfono.
+      shouldSyncHistoryMessage: () => false,
       generateHighQualityLinkPreview: false,
       markOnlineOnConnect: false,
       printQRInTerminal: false,
