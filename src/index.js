@@ -346,12 +346,17 @@ function fuzzyPhrase(words, acceptedPhrases) {
 
 function isPaymentWord(word) {
   const w = norm(word);
+  // Los números nunca deben interpretarse como comandos de pago.
+  if (!/[a-záéíóúñ]/i.test(w)) return false;
   if (w === "p") return true;
   return fuzzyWord(w, ["pa", "pag", "pago", "pagado", "pagar", "paf"], 1);
 }
 
 function isTransferWord(word) {
-  return fuzzyWord(norm(word), ["t", "tr", "tra", "trans", "transf", "transfer", "transferencia"], 1);
+  const w = norm(word);
+  // Los números nunca deben interpretarse como "transferencia".
+  if (!/[a-záéíóúñ]/i.test(w)) return false;
+  return fuzzyWord(w, ["t", "tr", "tra", "trans", "transf", "transfer", "transferencia"], 1);
 }
 
 function isRetiroWord(word) {
