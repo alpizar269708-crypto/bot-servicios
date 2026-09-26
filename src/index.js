@@ -428,7 +428,7 @@ function quotedServiceName(text) {
   // 🧾 SERVICIO REGISTRADO
   // 👤 Kevin
   // 💵 $135
-  const botName = t.match(/^\\s*👤\\s*(?:Usuario\\s*:\\s*)?(.+?)\\s*$/im);
+  const botName = t.match(/^\s*👤\s*(?:Usuario\s*:\s*)?(.+?)\s*$/im);
   if (botName) return botName[1].replace(/[*_]/g, "").trim();
 
   // Mensajes humanos tipo "Persona 250" o "250 Persona".
