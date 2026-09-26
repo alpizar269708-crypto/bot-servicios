@@ -1084,7 +1084,7 @@ async function handleMessage(msg) {
       : "No hay servicios registrados.";
 
     await send(jid,
-      "📋 *CUENTA " + s.account.number + "*\n\n" +
+      "📋 *CUENTA*\n\n" +
       body + "\n\n" +
       "📊 Suma: *" + money(s.total) + "*\n" +
       "💸 Retiros: *" + money(s.withdrawnTotal) + "*\n" +
@@ -1245,7 +1245,7 @@ async function handleMessage(msg) {
     const ps = previous?.finalSummary;
 
     await send(jid,
-      "🆕 *CUENTA " + account.number + "*\n" +
+      "🆕 *CUENTA*\n" +
       "💵 Inicio: *" + money(account.initialAmount) + "*\n" +
       (ps
         ? "\n📌 *CUENTA ANTERIOR*\n" +
