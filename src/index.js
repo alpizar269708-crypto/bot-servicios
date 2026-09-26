@@ -914,8 +914,12 @@ async function handleMessage(msg) {
 
   if (!text) return;
 
-  const command = commandOf(text);
+  let command = commandOf(text);
   const quoted = quotedText(msg);
+
+  if (!command && quoted && /^\\s*\\d+\\s*$/.test(text) && /DEUDORES/i.test(quoted)) {
+    command = "deudoresp";
+  }
 
   if (command === "activar") {
     const result = await activateChat(jid);
