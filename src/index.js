@@ -377,7 +377,8 @@ function commandOf(text) {
   if (words.length === 1) {
     if (fuzzyWord(first, ["deudores", "deudor"], 1)) return "deudores";
     if (fuzzyWord(first, ["todopagado", "todospagados"], 2)) return "todopagado";
-    if (fuzzyWord(first, ["pagados", "pagado"], 2)) return "pagados";
+    if (fuzzyWord(first, ["pagados"], 1)) return "pagados";
+    if (fuzzyWord(first, ["pagado"], 1)) return "pag";
     if (fuzzyWord(first, ["corte"], 1)) return "corte";
   }
 
@@ -423,8 +424,11 @@ function quotedServiceName(text) {
   const t = String(text || "").trim();
   if (!t) return "";
 
-  // Mensajes del propio bot.
-  const botName = t.match(/(?:👤|Usuario:?)[\\s:*]*([^\\n]+?)(?=\\n|💵|$)/i);
+  // Mensajes del propio bot, por ejemplo:
+  // 🧾 SERVICIO REGISTRADO
+  // 👤 Kevin
+  // 💵 $135
+  const botName = t.match(/^\\s*👤\\s*(?:Usuario\\s*:\\s*)?(.+?)\\s*$/im);
   if (botName) return botName[1].replace(/[*_]/g, "").trim();
 
   // Mensajes humanos tipo "Persona 250" o "250 Persona".
