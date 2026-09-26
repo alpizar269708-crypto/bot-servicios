@@ -1379,10 +1379,15 @@ async function handleMessage(msg) {
           "💵 " + money(a.amount) + "\n" +
           "🚫 No se suma al total.");
       } else {
+        const summary = await servicesSummary();
+        const serviceCount = summary.rows.length;
+
         await send(jid,
           "🧾 *SERVICIO REGISTRADO*\n" +
           "👤 " + name + "\n" +
-          "💵 " + money(a.amount));
+          "💵 " + money(a.amount) + "\n\n" +
+          "📊 Servicios registrados: *" + serviceCount + "*\n" +
+          "💰 Suma acumulada: *" + money(summary.total) + "*");
       }
     }
   }
