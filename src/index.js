@@ -1220,9 +1220,22 @@ async function handleMessage(msg) {
   if (command === "cuenta_nueva") {
     let args = text.trim();
     if (args.startsWith(PREFIX)) args = args.slice(PREFIX.length).trim();
-    const rest = args.split(/\s+/).slice(2).join(" ");
-    const a = amountFrom(rest);
-    const account = await newAccount(a ? a.amount : 0);
+
+    // "cuenta nueva" acepta el monto de inicio aunque venga:
+    // - con comas: 1,000 / 10,000
+    // - sin comas: 1000 / 10000
+    // - con espacios: 1 000 / 10 000
+    // - en renglones separados: 1\n000
+    // - con signo de pesos: $1,000
+    // También acepta variantes como "cuenta nueva: 1,000".
+    const rest = args
+      .replace(/^cuenta\s+nueva\b/i, "")
+      .replace(/^cuentanueva\b/i, "")
+      .trim();
+
+    const digits = rest.replace(/[^0-9]/g, "");
+    const initialAmount = digits ? Number(digits) : 0;
+    const account = await newAccount(initialAmount);
 
     const { accounts } = await collections();
     const previous = await accounts.findOne(
