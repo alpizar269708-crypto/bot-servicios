@@ -42,6 +42,7 @@ const {
   default: makeWASocket,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   initAuthCreds,
   BufferJSON,
@@ -1365,7 +1366,7 @@ async function start(mode = "qr", phone = "", onCodeReady = null) {
   try {
     if (!authState) authState = await useMongoDBAuthState("sesion");
     const { state, saveCreds } = authState;
-    const latest = await fetchLatestBaileysVersion();
+    const latest = await fetchLatestWaWebVersion();
 
     sock = makeWASocket({
       version: latest.version,
@@ -1463,7 +1464,12 @@ async function start(mode = "qr", phone = "", onCodeReady = null) {
           currentQR = null;
           currentPairingCode = null;
           requestedPairingPhone = null;
-          console.log("🔴 WhatsApp reportó SESIÓN CERRADA (loggedOut). Las credenciales se conservan en MongoDB.");
+          console.log("🔴 WhatsApp reportó SESIÓN CERRADA (loggedOut). Eliminando únicamente la sesión de WhatsApp para permitir una nueva vinculación.");
+          try {
+            await resetWhatsAppAuth();
+          } catch (e) {
+            console.error("❌ No se pudo limpiar la sesión de WhatsApp:", e?.message || e);
+          }
           return;
         }
 
