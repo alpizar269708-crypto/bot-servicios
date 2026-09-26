@@ -375,6 +375,7 @@ function commandOf(text) {
   // Comandos simples: solo se comparan cuando no llevan argumentos.
   if (words.length === 1) {
     if (fuzzyWord(first, ["deudores", "deudor"], 1)) return "deudores";
+    if (fuzzyWord(first, ["todopagado", "todospagados"], 2)) return "todopagado";
     if (fuzzyWord(first, ["pagados", "pagado"], 2)) return "pagados";
     if (fuzzyWord(first, ["corte"], 1)) return "corte";
   }
@@ -844,6 +845,7 @@ function menu() {
     "👥 *DEUDORES*",
     "deudores — ve quiénes deben.",
     "deudoresp 1 3 9 — marca como pagados varios deudores de la lista.",
+    "todopagado — marca como pagados a todos los deudores y limpia la lista.",
     "",
     "📋 *LISTA*",
     "lista servicios — consulta los servicios.",
@@ -935,6 +937,50 @@ async function handleMessage(msg) {
 
   if (command === "menu") {
     await send(jid, menu());
+    return;
+  }
+
+  if (command === "todopagado") {
+    const { services } = await collections();
+    const pending = await services.find({
+      status: "pending",
+      personName: { $not: /^retiro$/i }
+    }).sort({ createdAt: 1 }).toArray();
+
+    if (!pending.length) {
+      await send(jid, "✅ La lista de deudores ya está vacía.");
+      return;
+    }
+
+    const grouped = new Map();
+    for (const x of pending) {
+      const key = String(x.personId);
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          name: x.personName,
+          total: 0
+        });
+      }
+      grouped.get(key).total += Number(x.amount || 0);
+    }
+
+    const results = [];
+    for (const g of grouped.values()) {
+      const result = await pay(g.name);
+      if (result.ok) {
+        results.push("✅ " + g.name + " — " + money(result.total));
+      }
+    }
+
+    const total = pending.reduce((sum, x) => sum + Number(x.amount || 0), 0);
+
+    await send(jid,
+      "💵 *TODO PAGADO*\n\n" +
+      "✅ Se marcaron como pagados todos los deudores.\n" +
+      "👥 Deudores liquidados: *" + results.length + "*\n" +
+      "💰 Total liquidado: *" + money(total) + "*\n\n" +
+      "🧹 La lista de deudores quedó vacía."
+    );
     return;
   }
 
