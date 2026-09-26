@@ -373,6 +373,12 @@ function commandOf(text) {
   const first = words[0];
   const joined = words.join(" ");
 
+  // "deuda" puede quedar a 2 letras de "ayuda", por eso DEUDORES
+  // debe evaluarse antes que MENU/AYUDA.
+  if (words.length === 1 && fuzzyWord(first, ["deudores", "deudor", "adeudos", "adeudo", "deudas", "deuda", "pendientes"], 2)) {
+    return "deudores";
+  }
+
   if (fuzzyWord(joined, ["menu", "ayuda"], 2)) return "menu";
   if (fuzzyWord(joined, ["menusecreto"], 2)) return "menusecreto";
   if (fuzzyWord(joined, ["activarbotservicios", "activarbotaqui"], 2)) return "activar";
