@@ -1371,7 +1371,7 @@ async function start(mode = "qr", phone = "", onCodeReady = null) {
       browser: Browsers.ubuntu("Chrome"),
       syncFullHistory: false,
       generateHighQualityLinkPreview: false,
-      markOnlineOnConnect: true,
+      markOnlineOnConnect: false,
       printQRInTerminal: false,
       getMessage: async () => ({ conversation: "" })
     });
@@ -1442,9 +1442,6 @@ async function start(mode = "qr", phone = "", onCodeReady = null) {
           onCodeReady = null;
         }
 
-        if (OWNER_PHONE) {
-          await send(OWNER_PHONE + "@s.whatsapp.net", "🤖 Bot de servicios conectado.\n\nEscribe: menu");
-        }
       }
 
       if (connection === "close") {
