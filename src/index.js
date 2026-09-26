@@ -1055,9 +1055,33 @@ async function handleMessage(msg) {
 
   if (command === "deudoresp") {
     const numbers = [];
-    const argsText = text
+    let argsText = text
       .replace(/\bdeudoresp\b/i, "")
       .trim();
+
+    // Si se responde al mensaje de DEUDORES y se escribe solo un número,
+    // ese número corresponde a la posición del deudor dentro de ese mensaje.
+    if (!argsText && quoted) {
+      const quotedLines = quoted.split(/\r?\n/);
+      const quotedNumber = quotedLines
+        .map(line => {
+          const m = line.match(/^\s*(\d+)\.\s*👤\s*\*?(.+?)\*?\s*[—-]\s*\$?([\d,]+)/);
+          return m ? { number: Number(m[1]), name: m[2].trim() } : null;
+        })
+        .filter(Boolean);
+
+      if (quotedNumber.length) {
+        // No hay número escrito; se mantiene vacío para que el bloque
+        // de abajo pueda usar el nombre si posteriormente se agrega lógica.
+      }
+    }
+
+    // Para responder al mensaje de DEUDORES con "2", el parser general
+    // puede haber dejado command=null. En ese caso handleMessage convierte
+    // el número en un pago por posición antes de continuar.
+    if (!argsText && /^\s*\d+\s*$/.test(text)) {
+      argsText = text.trim();
+    }
 
     for (const part of argsText.split(/\s+/).filter(Boolean)) {
       const range = part.match(/^(\d+)\s*-\s*(\d+)$/);
