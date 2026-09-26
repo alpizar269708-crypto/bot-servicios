@@ -369,6 +369,7 @@ function commandOf(text) {
   const joined = words.join(" ");
 
   if (fuzzyWord(joined, ["menu", "ayuda"], 2)) return "menu";
+  if (fuzzyWord(joined, ["menusecreto"], 2)) return "menusecreto";
   if (fuzzyWord(joined, ["activarbotservicios", "activarbotaqui"], 2)) return "activar";
   if (fuzzyWord(joined, ["desactivarbotservicios", "desactivarbotaqui"], 2)) return "desactivar";
 
@@ -862,6 +863,17 @@ function menu() {
     "corte — muestra y cierra la cuenta."
   ].join("\n");
 }
+function menuSecreto() {
+  return [
+    "🔐 *MENÚ SECRETO*",
+    "",
+    "⚙️ *COMANDOS OCULTOS*",
+    "",
+    "🔓 activarbotservicios — activa el bot en un grupo.",
+    "🔒 desactivarbotservicios — desactiva el bot.",
+    "💵 pagados — muestra los servicios que ya fueron pagados."
+  ].join("\n");
+}
 async function send(jid, text) {
   if (!sock) return null;
 
@@ -941,6 +953,11 @@ async function handleMessage(msg) {
 
   if (command === "menu") {
     await send(jid, menu());
+    return;
+  }
+
+  if (command === "menusecreto") {
+    await send(jid, menuSecreto());
     return;
   }
 
