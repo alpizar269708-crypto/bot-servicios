@@ -755,7 +755,11 @@ async function servicesSummary() {
     accountNumber: account.number
   }).sort({ createdAt: 1 }).toArray();
 
-  const total = rows.reduce((s, x) => s + Number(x.amount || 0), 0);
+  // El monto de inicio de "cuenta nueva" forma parte del dinero de la cuenta.
+  // No es un servicio ni un deudor, pero sí debe sumarse al total disponible
+  // y a la suma acumulada que muestran los reportes.
+  const serviceTotal = rows.reduce((s, x) => s + Number(x.amount || 0), 0);
+  const total = Number(account.initialAmount || 0) + serviceTotal;
   const withdrawalRows = await c.withdrawals.find({ accountNumber: account.number }).sort({ createdAt: 1 }).toArray();
   const withdrawnTotal = withdrawalRows.reduce((s, x) => s + Number(x.amount || 0), 0);
   const netTotal = total - withdrawnTotal;
