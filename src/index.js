@@ -1329,8 +1329,11 @@ async function handleMessage(msg) {
 }
 
 async function resetWhatsAppAuth() {
-  const auth = (await collections()).auth;
-  await auth.deleteMany({});
+  // La sesión REAL de Baileys se guarda en la colección auth_sessions
+  // mediante src/mongoAuth.js. La colección bot_servicios_auth es antigua
+  // y no debe usarse para borrar la sesión de WhatsApp.
+  await mongoose.connection.db.collection("auth_sessions").deleteMany({});
+  authState = null;
   currentQR = null;
   currentPairingCode = null;
   requestedPairingPhone = null;
@@ -1368,7 +1371,7 @@ async function start(mode = "qr", phone = "", onCodeReady = null) {
       version: latest.version,
       logger,
       auth: state,
-      browser: Browsers.macOS("Desktop"),
+      browser: Browsers.macOS("Chrome"),
       syncFullHistory: false,
       // Este bot no necesita descargar historial de chats. Bloqueamos la
       // sincronización automática de historial para evitar que WhatsApp
