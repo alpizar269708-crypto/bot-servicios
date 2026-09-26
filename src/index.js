@@ -788,6 +788,41 @@ async function servicesSummary() {
   };
 }
 
+async function undoPayment(name) {
+  const account = await ensureAccount();
+  const c = await collections();
+  const p = await c.people.findOne({ normalizedName: norm(name) });
+
+  if (!p) return { ok: false, reason: "not_found" };
+
+  const payment = await c.payments.findOne(
+    { accountNumber: account.number, personId: p._id },
+    { sort: { createdAt: -1 } }
+  );
+
+  if (!payment || !Array.isArray(payment.serviceIds) || !payment.serviceIds.length) {
+    return { ok: false, reason: "none", person: p };
+  }
+
+  const result = await c.services.updateMany(
+    { _id: { $in: payment.serviceIds }, personId: p._id, status: "paid" },
+    { $set: { status: "pending" }, $unset: { paidAt: "" } }
+  );
+
+  if (!result.modifiedCount) {
+    return { ok: false, reason: "none", person: p };
+  }
+
+  await c.payments.deleteOne({ _id: payment._id });
+
+  return {
+    ok: true,
+    person: p,
+    total: Number(payment.amount || 0),
+    count: payment.serviceIds.length
+  };
+}
+
 async function pay(name) {
   const account = await ensureAccount();
   const c = await collections();
@@ -921,11 +956,17 @@ async function handleMessage(msg) {
 
   const quoted = quotedText(msg);
 
-  // Una respuesta numérica al mensaje de DEUDORES siempre significa
-  // seleccionar ese número para registrarlo como PAGADO.
-  // Tiene prioridad sobre comandos aproximados como "retiro".
+  // Si se responde a un PAGO REGISTRADO y se escribe "error" o una
+  // variante con faltas, se deshace ese pago y el servicio vuelve a pendiente.
   let command;
-  if (quoted && /^\s*\d+\s*$/.test(text) && /DEUDORES/i.test(quoted)) {
+  if (
+    quoted &&
+    /PAGO\s+REGISTRADO/i.test(quoted) &&
+    /^\s*\S+\s*$/.test(text) &&
+    fuzzyWord(norm(text), ["error"], 2)
+  ) {
+    command = "errorpago";
+  } else if (quoted && /^\s*\d+\s*$/.test(text) && /DEUDORES/i.test(quoted)) {
     command = "deudoresp";
   } else {
     command = commandOf(text);
@@ -1063,6 +1104,51 @@ async function handleMessage(msg) {
     await send(jid,
       "👥 *DEUDORES*\n\n" + body +
       "\n\n💰 Total pendiente: *" + money(total) + "*"
+    );
+    return;
+  }
+
+  if (command === "errorpago") {
+    const name = quotedServiceName(quoted);
+
+    if (!name) {
+      await send(jid, "❌ No pude identificar el pago que quieres corregir.");
+      return;
+    }
+
+    const result = await undoPayment(name);
+
+    if (!result.ok) {
+      await send(jid,
+        result.reason === "not_found"
+          ? "❌ No encuentro a *" + name + "*."
+          : "ℹ️ No encontré un pago reciente de *" + name + "* para corregir."
+      );
+      return;
+    }
+
+    const rows = await debtors();
+    const body = rows.length
+      ? rows.map((x, i) =>
+          (i + 1) + ". 👤 " + x.name + " — " + money(x.total) +
+          "\n   💵 " + money(x.total) + "   📅 " +
+          new Date().toLocaleDateString("es-MX", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "2-digit"
+          })
+        ).join("\n\n")
+      : "No hay deudores.";
+
+    const total = rows.reduce((s, x) => s + Number(x.total || 0), 0);
+
+    await send(jid,
+      "↩️ *PAGO CORREGIDO*\n" +
+      "👤 " + result.person.name + "\n" +
+      "💵 " + money(result.total) + "\n\n" +
+      "👥 *DEUDORES*\n\n" +
+      body +
+      "\n\n💰 Total pendiente: " + money(total)
     );
     return;
   }
