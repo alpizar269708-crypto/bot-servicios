@@ -1368,7 +1368,7 @@ async function start(mode = "qr", phone = "", onCodeReady = null) {
       version: latest.version,
       logger,
       auth: state,
-      browser: Browsers.ubuntu("Chrome"),
+      browser: Browsers.macOS("Desktop"),
       syncFullHistory: false,
       generateHighQualityLinkPreview: false,
       markOnlineOnConnect: false,
