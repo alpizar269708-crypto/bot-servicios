@@ -380,7 +380,7 @@ function commandOf(text) {
 
   // Comandos simples: solo se comparan cuando no llevan argumentos.
   if (words.length === 1) {
-    if (fuzzyWord(first, ["deudores", "deudor"], 1)) return "deudores";
+    if (fuzzyWord(first, ["deudores", "deudor", "adeudos", "adeudo", "deudas", "deuda", "pendientes"], 2)) return "deudores";
     if (fuzzyWord(first, ["todopagado", "todospagados"], 2)) return "todopagado";
     if (fuzzyWord(first, ["pagados"], 1)) return "pagados";
     if (fuzzyWord(first, ["pagado"], 1)) return "pag";
