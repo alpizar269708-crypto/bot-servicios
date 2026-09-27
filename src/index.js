@@ -1916,7 +1916,7 @@ async function handleMessage(msg) {
       "🔄 *TRANSFERENCIA*\n" +
       "👤 " + name + "\n" +
       "💵 " + money(a.amount) + "\n" +
-      "🚫 No entra a caja."
+
     );
     return;
   }
@@ -2153,7 +2153,7 @@ async function handleMessage(msg) {
           "🔄 *TRANSFERENCIA*\n" +
           "👤 " + name + "\n" +
           "💵 " + money(a.amount) + "\n" +
-          "🚫 No entra a caja.");
+    );
       } else {
         const summary = await servicesSummary();
         const serviceCount = summary.rows.length;
@@ -2162,7 +2162,7 @@ async function handleMessage(msg) {
           "🧾 *SERVICIO " + serviceCount + "*\n" +
           "👤 " + name + "\n" +
           "💵 " + money(a.amount) + "\n\n" +
-          "💰 Suma: *" + money(summary.total) + "*");
+          "💰 Total: *" + money(summary.total) + "*");
       }
     }
   }
