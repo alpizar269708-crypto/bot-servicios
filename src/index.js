@@ -1912,11 +1912,12 @@ async function handleMessage(msg) {
     }
 
     await addService(name, a.amount, jid, true);
+    const transferSummary = await servicesSummary();
     await send(jid,
       "🔄 *TRANSFERENCIA*\n" +
       "👤 " + name + "\n" +
-      "💵 " + money(a.amount) + "\n" +
-
+      "💵 " + money(a.amount) + "\n\n" +
+      "💰 Suma actual: *" + money(transferSummary.netTotal) + "*"
     );
     return;
   }
