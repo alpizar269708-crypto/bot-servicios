@@ -292,10 +292,26 @@ function parseAmount(v) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+function isDateText(text) {
+  return /^(?:\d{1,2}[\\/-]\d{1,2}[\\/-]\d{2,4}|\d{1,2}[\\/-]\d{1,2})$/.test(String(text || "").trim());
+}
+
 function amountFrom(text) {
-  const m = String(text).match(/(?:^|\s)\$?\d+(?:[.,]\d{1,2})?(?=\s|$)/);
+  const value = String(text || "").trim();
+
+  // Una fecha nunca debe interpretarse como importe.
+  // Ej.: 26/09/26, 26-09-26 o 26/09.
+  if (isDateText(value)) return null;
+
+  const m = value.match(/(?:^|\s)\$?\d+(?:[.,]\d{1,2})?(?=\s|$)/);
   if (!m) return null;
   const raw = m[0].trim();
+
+  // Si el texto completo contiene una fecha, no tomamos ninguna
+  // de sus partes numéricas como importe.
+  const withoutDate = value.replace(/\b\d{1,2}[\\/-]\d{1,2}[\\/-]\d{2,4}\b/g, " ").trim();
+  if (!withoutDate || !/(?:^|\s)\$?\d+(?:[.,]\d{1,2})?(?=\s|$)/.test(withoutDate)) return null;
+
   const amount = parseAmount(raw);
   return amount ? { raw, amount } : null;
 }
