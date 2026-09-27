@@ -387,6 +387,7 @@ function commandOf(text) {
   // Comandos simples: solo se comparan cuando no llevan argumentos.
   if (words.length === 1) {
     if (fuzzyWord(first, ["deudores", "deudor", "adeudos", "adeudo", "deudas", "deuda", "pendientes"], 2)) return "deudores";
+    if (fuzzyWord(first, ["eliminar", "elimina", "borrar", "borra", "quita", "quitar"], 2)) return "eliminar";
     if (fuzzyWord(first, ["todopagado", "todospagados"], 2)) return "todopagado";
     if (fuzzyWord(first, ["pagados"], 1)) return "pagados";
     if (fuzzyWord(first, ["pagado"], 1)) return "pag";
@@ -474,7 +475,8 @@ async function collections() {
     transfers: db.collection(COLLECTION + "_transfers"),
     withdrawals: db.collection(COLLECTION + "_withdrawals"),
     auth: db.collection(COLLECTION + "_auth"),
-    activation: db.collection(COLLECTION + "_activation")
+    activation: db.collection(COLLECTION + "_activation"),
+    pendingActions: db.collection(COLLECTION + "_pending_actions")
   };
 }
 
@@ -829,6 +831,44 @@ async function undoPayment(name) {
   };
 }
 
+async function payServices(name, serviceIds) {
+  const account = await ensureAccount();
+  const c = await collections();
+  const p = await c.people.findOne({ normalizedName: norm(name) });
+
+  if (!p) return { ok: false, reason: "not_found" };
+
+  const ids = Array.isArray(serviceIds) ? serviceIds : [];
+  if (!ids.length) return { ok: false, reason: "none", person: p };
+
+  const pending = await c.services.find({
+    _id: { $in: ids },
+    personId: p._id,
+    status: "pending"
+  }).toArray();
+
+  if (!pending.length) return { ok: false, reason: "none", person: p };
+
+  const total = pending.reduce((s, x) => s + Number(x.amount || 0), 0);
+  const realIds = pending.map(x => x._id);
+
+  await c.services.updateMany(
+    { _id: { $in: realIds } },
+    { $set: { status: "paid", paidAt: new Date() } }
+  );
+
+  await c.payments.insertOne({
+    accountNumber: account.number,
+    personId: p._id,
+    personName: p.name,
+    amount: total,
+    serviceIds: realIds,
+    createdAt: new Date()
+  });
+
+  return { ok: true, person: p, total, count: pending.length, services: pending };
+}
+
 async function pay(name) {
   const account = await ensureAccount();
   const c = await collections();
@@ -861,6 +901,99 @@ async function pay(name) {
   });
 
   return { ok: true, person: p, total, count: pending.length };
+}
+
+async function deleteService(serviceId) {
+  const account = await ensureAccount();
+  const c = await collections();
+
+  const service = await c.services.findOne({
+    _id: serviceId,
+    accountNumber: account.number
+  });
+
+  if (!service) return { ok: false, reason: "not_found" };
+
+  // Si ya estaba pagado, quitamos también su referencia del registro de pago.
+  if (service.status === "paid") {
+    const payment = await c.payments.findOne({
+      accountNumber: account.number,
+      serviceIds: service._id
+    });
+
+    if (payment) {
+      const remainingIds = payment.serviceIds.filter(id => String(id) !== String(service._id));
+      if (!remainingIds.length) {
+        await c.payments.deleteOne({ _id: payment._id });
+      } else {
+        const remaining = await c.services.find({
+          _id: { $in: remainingIds }
+        }).toArray();
+        const amount = remaining.reduce((s, x) => s + Number(x.amount || 0), 0);
+        await c.payments.updateOne(
+          { _id: payment._id },
+          { $set: { serviceIds: remainingIds, amount } }
+        );
+      }
+    }
+  }
+
+  await c.services.deleteOne({ _id: service._id });
+
+  // Evita que una selección pendiente conserve un servicio que ya fue eliminado.
+  await c.pendingActions.deleteMany({
+    serviceIds: service._id
+  });
+
+  return { ok: true, service };
+}
+
+async function pendingServicesForPerson(name) {
+  const c = await collections();
+  const p = await c.people.findOne({ normalizedName: norm(name) });
+  if (!p) return { ok: false, reason: "not_found" };
+
+  const rows = await c.services.find({
+    personId: p._id,
+    status: "pending"
+  }).sort({ createdAt: 1 }).toArray();
+
+  return { ok: true, person: p, rows };
+}
+
+function formatServiceDate(date) {
+  return new Date(date).toLocaleDateString("es-MX", {
+    timeZone: "America/Mexico_City",
+    dateStyle: "short"
+  });
+}
+
+function formatDebtChoices(person, rows) {
+  return rows.map((x, i) =>
+    (i + 1) + ". 💵 " + money(x.amount) + "   📅 " + formatServiceDate(x.createdAt)
+  ).join("\n");
+}
+
+async function savePendingAction(jid, action) {
+  const { pendingActions } = await collections();
+  await pendingActions.deleteMany({ jid });
+  await pendingActions.insertOne({
+    jid,
+    ...action,
+    createdAt: new Date()
+  });
+}
+
+async function getPendingAction(jid) {
+  const { pendingActions } = await collections();
+  const action = await pendingActions.findOne({ jid });
+  if (!action) return null;
+  return action;
+}
+
+async function clearPendingAction(jid) {
+  const { pendingActions } = await collections();
+  await pendingActions.deleteMany({ jid });
 }
 
 async function debtors() {
@@ -965,6 +1098,66 @@ async function handleMessage(msg) {
   // Si se responde a un PAGO REGISTRADO y se escribe "error" o una
   // variante con faltas, se deshace ese pago y el servicio vuelve a pendiente.
   let command;
+  // Si el bot está esperando que el usuario elija una deuda, una respuesta
+  // numérica o por importe se procesa antes que cualquier otro comando.
+  const pendingAction = await getPendingAction(jid);
+  if (pendingAction && !/PAGO\s+REGISTRADO/i.test(quoted || "") && text.trim()) {
+    const choiceText = text.trim();
+    const selectedNumber = /^\d+$/.test(choiceText) ? Number(choiceText) : null;
+    const selectedAmount = amountFrom(choiceText);
+
+    if (pendingAction.type === "pay_select") {
+      let selected = null;
+      if (selectedNumber && pendingAction.serviceIds[selectedNumber - 1]) {
+        selected = pendingAction.serviceIds[selectedNumber - 1];
+      } else if (selectedAmount) {
+        const matches = pendingAction.rows.filter(x => Number(x.amount) === Number(selectedAmount.amount));
+        if (matches.length === 1) selected = String(matches[0]._id);
+      }
+
+      if (selected) {
+        const result = await payServices(pendingAction.personName, [selected]);
+        await clearPendingAction(jid);
+        if (result.ok) {
+          await send(jid,
+            "✅ *PAGO REGISTRADO*\n" +
+            "👤 " + result.person.name + "\n" +
+            "💵 " + money(result.total) + "\n" +
+            "🧾 " + result.count + " servicio"
+          );
+        } else {
+          await send(jid, "ℹ️ Esa deuda ya no está pendiente.");
+        }
+        return;
+      }
+    }
+
+    if (pendingAction.type === "delete_select") {
+      let selected = null;
+      if (selectedNumber && pendingAction.serviceIds[selectedNumber - 1]) {
+        selected = pendingAction.serviceIds[selectedNumber - 1];
+      } else if (selectedAmount) {
+        const matches = pendingAction.rows.filter(x => Number(x.amount) === Number(selectedAmount.amount));
+        if (matches.length === 1) selected = String(matches[0]._id);
+      }
+
+      if (selected) {
+        const result = await deleteService(selected);
+        await clearPendingAction(jid);
+        if (result.ok) {
+          await send(jid,
+            "🗑️ *SERVICIO ELIMINADO*\n" +
+            "👤 " + result.service.personName + "\n" +
+            "💵 " + money(result.service.amount)
+          );
+        } else {
+          await send(jid, "ℹ️ Ese servicio ya no existe.");
+        }
+        return;
+      }
+    }
+  }
+
   if (
     quoted &&
     /PAGO\s+REGISTRADO/i.test(quoted) &&
@@ -1301,6 +1494,79 @@ async function handleMessage(msg) {
     return;
   }
 
+  if (command === "eliminar") {
+    let args = text.trim();
+    if (args.startsWith(PREFIX)) args = args.slice(PREFIX.length).trim();
+    args = args.split(/\s+/).slice(1).join(" ").trim();
+
+    let name = "";
+    let targetAmount = null;
+
+    if (quoted && /SERVICIO REGISTRADO|👤/i.test(quoted) && !args) {
+      name = quotedServiceName(quoted);
+      const qa = amountFrom(quoted);
+      if (qa) targetAmount = qa.amount;
+    } else {
+      const a = amountFrom(args);
+      if (a) {
+        targetAmount = a.amount;
+        name = cleanName(args, a.raw);
+      } else {
+        name = args;
+      }
+    }
+
+    if (!name) {
+      await send(jid, "❌ Responde al servicio con *eliminar* o escribe: eliminar Mari 250.");
+      return;
+    }
+
+    const pending = await pendingServicesForPerson(name);
+    if (!pending.ok) {
+      await send(jid, "❌ No encuentro a *" + name + "*.");
+      return;
+    }
+
+    let rows = pending.rows;
+    if (targetAmount !== null) {
+      rows = rows.filter(x => Number(x.amount) === Number(targetAmount));
+    }
+
+    if (!rows.length) {
+      await send(jid, "ℹ️ No encontré ese servicio pendiente de *" + pending.person.name + "*.");
+      return;
+    }
+
+    if (rows.length > 1) {
+      await savePendingAction(jid, {
+        type: "delete_select",
+        personName: pending.person.name,
+        serviceIds: rows.map(x => x._id),
+        rows
+      });
+      await send(jid,
+        "🗑️ *¿QUÉ SERVICIO QUIERES ELIMINAR?*\n\n" +
+        "👤 " + pending.person.name + "\n" +
+        formatDebtChoices(pending.person, rows) +
+        "\n\nResponde con el *número* o el *importe*."
+      );
+      return;
+    }
+
+    const result = await deleteService(rows[0]._id);
+    if (!result.ok) {
+      await send(jid, "❌ No pude eliminar ese servicio.");
+      return;
+    }
+
+    await send(jid,
+      "🗑️ *SERVICIO ELIMINADO*\n" +
+      "👤 " + result.service.personName + "\n" +
+      "💵 " + money(result.service.amount)
+    );
+    return;
+  }
+
   if (command === "listaservicios") {
     const s = await servicesSummary();
 
@@ -1348,30 +1614,62 @@ async function handleMessage(msg) {
     let args = text.trim();
     if (args.startsWith(PREFIX)) args = args.slice(PREFIX.length).trim();
 
-    // Acepta "pag Persona", "Persona pag", "p Persona", "Persona p", etc.
-    // Si se responde a cualquier mensaje de servicio, usa el nombre citado.
     let name = paymentNameFromText(args);
+    const requestedAmount = amountFrom(args);
+
     if (!name && quoted) name = quotedServiceName(quoted);
 
     if (!name) {
-      await send(jid, "❌ Escribe el nombre o responde al servicio y escribe cualquier comando de pago que empiece con P.");
+      await send(jid, "❌ Escribe el nombre o responde al servicio y escribe un comando de pago.");
       return;
     }
 
-    const result = await pay(name);
+    const pending = await pendingServicesForPerson(name);
 
-    if (!result.ok) {
-      await send(jid, result.reason === "not_found"
-        ? "❌ No encuentro a *" + name + "*."
-        : "ℹ️ *" + result.person.name + "* no tiene servicios pendientes.");
+    if (!pending.ok) {
+      await send(jid, "❌ No encuentro a *" + name + "*.");
       return;
     }
+
+    let rows = pending.rows;
+
+    if (requestedAmount) {
+      rows = rows.filter(x => Number(x.amount) === Number(requestedAmount.amount));
+    }
+
+    if (!rows.length) {
+      await send(jid, "ℹ️ *" + pending.person.name + "* no tiene esa deuda pendiente.");
+      return;
+    }
+
+    if (rows.length === 1) {
+      const result = await payServices(pending.person.name, [rows[0]._id]);
+      if (!result.ok) {
+        await send(jid, "ℹ️ Esa deuda ya no está pendiente.");
+        return;
+      }
+
+      await send(jid,
+        "✅ *PAGO REGISTRADO*\n" +
+        "👤 " + result.person.name + "\n" +
+        "💵 " + money(result.total) + "\n" +
+        "🧾 " + result.count + " servicio"
+      );
+      return;
+    }
+
+    await savePendingAction(jid, {
+      type: "pay_select",
+      personName: pending.person.name,
+      serviceIds: rows.map(x => x._id),
+      rows
+    });
 
     await send(jid,
-      "✅ *PAGO REGISTRADO*\n" +
-      "👤 " + result.person.name + "\n" +
-      "💵 " + money(result.total) + "\n" +
-      "🧾 " + result.count + " servicio" + (result.count === 1 ? "" : "s")
+      "💵 *¿QUÉ DEUDA QUIERES PAGAR?*\n\n" +
+      "👤 " + pending.person.name + "\n" +
+      formatDebtChoices(pending.person, rows) +
+      "\n\nResponde con el *número*, el *importe* o la *fecha*."
     );
     return;
   }
