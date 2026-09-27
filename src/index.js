@@ -1149,7 +1149,7 @@ function menu() {
     "que quedó al final de la cuenta anterior.",
     "",
     "✂️ *CORTE*",
-    "corte — muestra y cierra la cuenta."
+    "corte — envía servicios, deudores y cierre de cuenta."
   ].join("\n");
 }
 function menuExtra() {
@@ -1253,25 +1253,6 @@ async function handleMessage(msg) {
       return;
     }
 
-    if (pendingAction.type === "pay_confirm") {
-      const answer = norm(choiceText);
-      if (["si", "sí", "s", "ok", "confirmar", "confirmado"].includes(answer)) {
-        const result = await payServices(pendingAction.personName, [pendingAction.serviceId]);
-        await clearPendingAction(jid);
-        await send(jid, result.ok
-          ? "✅ *PAGO REGISTRADO*\\n👤 " + result.person.name + "\\n💵 " + money(result.total) + "\\n🧾 " + result.count + " servicio"
-          : "ℹ️ Esa deuda ya no está pendiente."
-        );
-        return;
-      }
-      if (["no", "n"].includes(answer)) {
-        await clearPendingAction(jid);
-        await send(jid, "👍 No se hizo ningún cambio.");
-        return;
-      }
-      await send(jid, "❓ Confirma con *sí* o escribe *cancelar*.");
-      return;
-    }
 
     const selectedNumber = selectionNumberFromText(choiceText);
     const selectedAmount = amountFrom(choiceText);
@@ -1299,25 +1280,6 @@ async function handleMessage(msg) {
 
       if (selected) {
         const chosen = pendingAction.rows.find(x => String(x._id) === String(selected));
-
-        // Los importes altos requieren una confirmación adicional para evitar
-        // errores por dictado o por tocar accidentalmente una opción.
-        if (chosen && Math.abs(Number(chosen.amount || 0)) >= 1000) {
-          await savePendingAction(jid, {
-            type: "pay_confirm",
-            personName: pendingAction.personName,
-            serviceId: chosen._id,
-            amount: Number(chosen.amount || 0)
-          });
-          await send(jid,
-            "⚠️ *CONFIRMACIÓN DE PAGO*\\n\\n" +
-            "👤 " + pendingAction.personName + "\\n" +
-            "💵 " + money(chosen.amount) + "\\n\\n" +
-            "¿Quieres pagar esta deuda?\\n" +
-            "Escribe *sí* para confirmar o *cancelar*."
-          );
-          return;
-        }
 
         const result = await payServices(pendingAction.personName, [selected]);
         await clearPendingAction(jid);
@@ -2027,14 +1989,85 @@ async function handleMessage(msg) {
   }
 
   if (command === "corte") {
+    // El corte envía exactamente 3 mensajes y en este orden:
+    // 1) lista de servicios
+    // 2) lista de deudores
+    // 3) resumen del corte
     const s = await servicesSummary();
-    const { accounts, cycles } = await collections();
+    const { accounts, cycles, services } = await collections();
     const closedAt = new Date();
 
+    // MENSAJE 1: LISTA DE SERVICIOS
+    const serviceBody = s.rows.length
+      ? s.rows.map((x, i) =>
+          (i + 1) + ". " + x.personName + " — " + money(x.amount) +
+          (x.status === "paid" ? " ✅" : " ⏳")
+        ).join("\n")
+      : "No hay servicios registrados.";
+
+    await send(jid,
+      "📋 *LISTA DE SERVICIOS*\n\n" +
+      serviceBody + "\n\n" +
+      "📊 Servicios: *" + s.rows.length + "*\n" +
+      "💰 Suma: *" + money(s.total) + "*"
+    );
+
+    // MENSAJE 2: LISTA DE DEUDORES
+    const debtorRows = await services.find({
+      status: "pending",
+      personName: { $not: /^retiro$/i }
+    }).sort({ createdAt: 1 }).toArray();
+
+    if (!debtorRows.length) {
+      await send(jid, "👥 *DEUDORES*\n\n✅ No hay deudores pendientes.");
+    } else {
+      const grouped = new Map();
+
+      for (const x of debtorRows) {
+        const key = String(x.personId);
+        if (!grouped.has(key)) {
+          grouped.set(key, {
+            name: x.personName,
+            total: 0,
+            rows: []
+          });
+        }
+
+        const g = grouped.get(key);
+        g.total += Number(x.amount || 0);
+        g.rows.push(x);
+      }
+
+      let debtorTotal = 0;
+      const debtorBody = [...grouped.values()].map((g, i) => {
+        debtorTotal += g.total;
+
+        const details = g.rows.map(x =>
+          "   💵 " + money(x.amount) + "   📅 " +
+          new Date(x.createdAt).toLocaleDateString("es-MX", {
+            timeZone: "America/Mexico_City",
+            dateStyle: "short"
+          })
+        ).join("\n");
+
+        return (i + 1) + ". 👤 *" + g.name + "* — " + money(g.total) +
+          "\n" + details;
+      }).join("\n\n");
+
+      await send(jid,
+        "👥 *DEUDORES*\n\n" +
+        debtorBody +
+        "\n\n💰 Total pendiente: *" + money(debtorTotal) + "*"
+      );
+    }
+
+    // Cerramos la cuenta después de enviar las dos listas,
+    // para que ambas correspondan al ciclo que se está cerrando.
     await accounts.updateOne(
       { _id: s.account._id },
       { $set: { active: false, closedAt } }
     );
+
     await cycles.updateOne(
       { accountNumber: s.account.number },
       {
@@ -2053,6 +2086,7 @@ async function handleMessage(msg) {
       }
     );
 
+    // MENSAJE 3: CORTE
     const serviceAmounts = [250, 35, 300];
     const serviceLines = serviceAmounts
       .map(amount => {
