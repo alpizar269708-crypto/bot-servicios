@@ -1916,7 +1916,7 @@ async function handleMessage(msg) {
       "🔄 *TRANSFERENCIA*\n" +
       "👤 " + name + "\n" +
       "💵 " + money(a.amount) + "\n" +
-      "🚫 No se suma al total."
+      "🚫 No entra a caja."
     );
     return;
   }
@@ -2153,7 +2153,7 @@ async function handleMessage(msg) {
           "🔄 *TRANSFERENCIA*\n" +
           "👤 " + name + "\n" +
           "💵 " + money(a.amount) + "\n" +
-          "🚫 No se suma al total.");
+          "🚫 No entra a caja.");
       } else {
         const summary = await servicesSummary();
         const serviceCount = summary.rows.length;
