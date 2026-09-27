@@ -2137,11 +2137,10 @@ async function handleMessage(msg) {
         const serviceCount = summary.rows.length;
 
         await send(jid,
-          "🧾 *SERVICIO REGISTRADO*\n" +
+          "🧾 *SERVICIO " + serviceCount + "*\n" +
           "👤 " + name + "\n" +
           "💵 " + money(a.amount) + "\n\n" +
-          "📊 Servicios registrados: *" + serviceCount + "*\n" +
-          "💰 Suma acumulada: *" + money(summary.total) + "*");
+          "💰 Suma: *" + money(summary.total) + "*");
       }
     }
   }
