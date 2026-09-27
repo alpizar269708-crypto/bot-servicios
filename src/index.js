@@ -463,6 +463,11 @@ function paymentNameFromText(text) {
   const a = amountFrom(t);
   if (a) t = cleanName(t, a.raw);
 
+  // Permite "Mari 26/09/26 pagado" o "26/09/26 Mari pagado".
+  t = t.replace(/\b\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return t.trim();
 }
 async function collections() {
