@@ -379,6 +379,45 @@ function isRetiroWord(word) {
   return fuzzyWord(norm(word), ["retiro", "retirar", "ret", "r"], 1);
 }
 
+function numberWordToInt(text) {
+  const w = norm(text);
+  const numbers = {
+    uno: 1, una: 1, primero: 1,
+    dos: 2, segundo: 2,
+    tres: 3, tercero: 3,
+    cuatro: 4, cuarto: 4,
+    cinco: 5, quinto: 5,
+    seis: 6, sexto: 6,
+    siete: 7, septimo: 7,
+    ocho: 8, octavo: 8,
+    nueve: 9, noveno: 9,
+    diez: 10, decimo: 10
+  };
+  return numbers[w] || null;
+}
+
+function selectionNumberFromText(text) {
+  const raw = norm(text);
+  if (!raw) return null;
+
+  if (/^\d+$/.test(raw)) return Number(raw);
+
+  const explicit = raw.match(/^(?:la|el|numero|num|número)\s+(\d+)$/i);
+  if (explicit) return Number(explicit[1]);
+
+  const word = numberWordToInt(raw);
+  if (word) return word;
+
+  const wordExplicit = raw.match(/^(?:la|el|numero|num|número)\s+([a-záéíóúñ]+)$/i);
+  if (wordExplicit) return numberWordToInt(wordExplicit[1]);
+
+  return null;
+}
+
+function isCancelText(text) {
+  return fuzzyWord(norm(text), ["cancelar", "cancela", "cancel", "salir", "no"], 1);
+}
+
 function commandOf(text) {
   let t = norm(text);
   if (t.startsWith(PREFIX)) t = t.slice(PREFIX.length).trim();
@@ -396,7 +435,9 @@ function commandOf(text) {
   }
 
   if (fuzzyWord(joined, ["menu", "ayuda"], 2)) return "menu";
+  if (fuzzyWord(joined, ["menuextra", "comandos", "ayudaextra", "ayudacomandos"], 2)) return "menuextra";
   if (fuzzyWord(joined, ["menusecreto"], 2)) return "menusecreto";
+  if (words.length === 1 && isCancelText(first)) return "cancelar";
   if (fuzzyWord(joined, ["activarbotservicios", "activarbotaqui"], 2)) return "activar";
   if (fuzzyWord(joined, ["desactivarbotservicios", "desactivarbotaqui"], 2)) return "desactivar";
 
@@ -1111,6 +1152,43 @@ function menu() {
     "corte — muestra y cierra la cuenta."
   ].join("\n");
 }
+function menuExtra() {
+  return [
+    "🧓 *AYUDA FÁCIL*",
+    "",
+    "💵 *CUANDO EL BOT PREGUNTA QUÉ DEUDA PAGAR*",
+    "Puedes escribir solamente:",
+    "• 2",
+    "• dos",
+    "• la 2",
+    "• numero 2",
+    "",
+    "⏱️ La selección dura 5 minutos.",
+    "Puedes responder al mensaje o no responderlo.",
+    "",
+    "🧹 *SI TE EQUIVOCAS*",
+    "Escribe: cancelar",
+    "También acepta: cancela, cancel o salir.",
+    "",
+    "💳 *PAGO CON NOMBRE*",
+    "Ejemplo: pagar Mari numero 2",
+    "También: pagar Mari la 2",
+    "",
+    "🗑️ *ELIMINAR UN SERVICIO*",
+    "Si hay varios, el bot también te deja escoger por número.",
+    "",
+    "🔢 *PAGAR VARIOS DEUDORES*",
+    "deudoresp 1 3 5",
+    "o deudoresp 1-5",
+    "",
+    "💡 *IMPORTANTE*",
+    "Los números solo se usan como selección cuando el bot está esperando una respuesta.",
+    "Fuera de ese contexto, no se inventa una acción.",
+    "",
+    "📋 Para ver el menú normal: menu",
+    "🔐 Para ver comandos administrativos: menusecreto"
+  ].join("\n");
+}
 function menuSecreto() {
   return [
     "🔐 *MENÚ SECRETO*",
@@ -1168,7 +1246,7 @@ async function handleMessage(msg) {
   const pendingAction = await getPendingAction(jid);
   if (pendingAction && !/PAGO\s+REGISTRADO/i.test(quoted || "") && text.trim()) {
     const choiceText = text.trim();
-    const selectedNumber = /^\d+$/.test(choiceText) ? Number(choiceText) : null;
+    const selectedNumber = selectionNumberFromText(choiceText);
     const selectedAmount = amountFrom(choiceText);
     const selectedDate = parseDateInput(choiceText);
 
@@ -1289,8 +1367,24 @@ async function handleMessage(msg) {
   // Fuera de ese grupo no responde a ningún comando ni registra datos.
   if (!(await isActivatedChat(jid))) return;
 
+  if (command === "cancelar") {
+    const pending = await getPendingAction(jid);
+    if (pending) {
+      await clearPendingAction(jid);
+      await send(jid, "✅ Selección cancelada. No se hizo ningún cambio.");
+    } else {
+      await send(jid, "ℹ️ No hay ninguna selección pendiente.");
+    }
+    return;
+  }
+
   if (command === "menu") {
     await send(jid, menu());
+    return;
+  }
+
+  if (command === "menuextra") {
+    await send(jid, menuExtra());
     return;
   }
 
