@@ -1867,8 +1867,8 @@ async function handleMessage(msg) {
       await send(jid,
         "✅ *PAGO REGISTRADO*\n" +
         "👤 " + result.person.name + "\n" +
-        "💵 " + money(result.total) + "\n" +
-        "🧾 " + result.count + " servicio"
+        "💵 " + money(result.total) +
+        (result.count > 1 ? "\n🧾 " + result.count + " servicios" : "")
       );
       return;
     }
