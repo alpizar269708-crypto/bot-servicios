@@ -299,7 +299,7 @@ function isDateText(text) {
 function amountFrom(text) {
   const value = String(text || "").trim();
 
-  // Una fecha nunca debe interpretarse como importe.
+  // Las fechas no se interpretan como importes.
   // Ej.: 26/09/26, 26-09-26 o 26/09.
   if (isDateText(value)) return null;
 
@@ -858,7 +858,7 @@ async function servicesSummary() {
   const withdrawnTotal = withdrawalRows.reduce((s, x) => s + Number(x.amount || 0), 0);
 
   // Caja real = TODO lo generado - transferencias - retiros.
-  // Pendiente/Pagado NO intervienen en este cálculo: solo sirven para control.
+  // Pendiente y pagado se conservan como datos del ciclo.
   const netTotal = total - transferTotal - withdrawnTotal;
 
   const pending = rows.filter(x => x.status === "pending");
@@ -2149,11 +2149,13 @@ async function handleMessage(msg) {
       const type = await addService(name, a.amount, jid, transfer);
 
       if (type === "transfer") {
+        const transferSummary = await servicesSummary();
         await send(jid,
           "🔄 *TRANSFERENCIA*\n" +
           "👤 " + name + "\n" +
-          "💵 " + money(a.amount) + "\n" +
-    );
+          "💵 " + money(a.amount) + "\n\n" +
+          "💰 Suma actual: *" + money(transferSummary.netTotal) + "*"
+        );
       } else {
         const summary = await servicesSummary();
         const serviceCount = summary.rows.length;
