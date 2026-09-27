@@ -1246,6 +1246,33 @@ async function handleMessage(msg) {
   const pendingAction = await getPendingAction(jid);
   if (pendingAction && !/PAGO\s+REGISTRADO/i.test(quoted || "") && text.trim()) {
     const choiceText = text.trim();
+
+    if (isCancelText(choiceText)) {
+      await clearPendingAction(jid);
+      await send(jid, "✅ Selección cancelada. No se hizo ningún cambio.");
+      return;
+    }
+
+    if (pendingAction.type === "pay_confirm") {
+      const answer = norm(choiceText);
+      if (["si", "sí", "s", "ok", "confirmar", "confirmado"].includes(answer)) {
+        const result = await payServices(pendingAction.personName, [pendingAction.serviceId]);
+        await clearPendingAction(jid);
+        await send(jid, result.ok
+          ? "✅ *PAGO REGISTRADO*\\n👤 " + result.person.name + "\\n💵 " + money(result.total) + "\\n🧾 " + result.count + " servicio"
+          : "ℹ️ Esa deuda ya no está pendiente."
+        );
+        return;
+      }
+      if (["no", "n"].includes(answer)) {
+        await clearPendingAction(jid);
+        await send(jid, "👍 No se hizo ningún cambio.");
+        return;
+      }
+      await send(jid, "❓ Confirma con *sí* o escribe *cancelar*.");
+      return;
+    }
+
     const selectedNumber = selectionNumberFromText(choiceText);
     const selectedAmount = amountFrom(choiceText);
     const selectedDate = parseDateInput(choiceText);
@@ -1271,6 +1298,27 @@ async function handleMessage(msg) {
       }
 
       if (selected) {
+        const chosen = pendingAction.rows.find(x => String(x._id) === String(selected));
+
+        // Los importes altos requieren una confirmación adicional para evitar
+        // errores por dictado o por tocar accidentalmente una opción.
+        if (chosen && Math.abs(Number(chosen.amount || 0)) >= 1000) {
+          await savePendingAction(jid, {
+            type: "pay_confirm",
+            personName: pendingAction.personName,
+            serviceId: chosen._id,
+            amount: Number(chosen.amount || 0)
+          });
+          await send(jid,
+            "⚠️ *CONFIRMACIÓN DE PAGO*\\n\\n" +
+            "👤 " + pendingAction.personName + "\\n" +
+            "💵 " + money(chosen.amount) + "\\n\\n" +
+            "¿Quieres pagar esta deuda?\\n" +
+            "Escribe *sí* para confirmar o *cancelar*."
+          );
+          return;
+        }
+
         const result = await payServices(pendingAction.personName, [selected]);
         await clearPendingAction(jid);
         if (result.ok) {
@@ -1792,6 +1840,11 @@ async function handleMessage(msg) {
     const requestedAmount = amountFrom(args);
     const requestedDate = parseDateInput(args);
 
+    // Formas naturales: "pagar Mari numero 2" / "pagar Mari la 2".
+    const indexMatch = norm(args).match(/^(?:p|pa|pag|pago|pagado|pagar)?\\s*(.+?)\\s+(?:la|el|numero|num|número)\\s+(\\d+)$/i);
+    const requestedIndex = indexMatch ? Number(indexMatch[2]) : null;
+    if (indexMatch) name = indexMatch[1].trim();
+
     if (!name && quoted) name = quotedServiceName(quoted);
 
     if (!name) {
@@ -1808,11 +1861,19 @@ async function handleMessage(msg) {
 
     let rows = pending.rows;
 
-    if (requestedAmount) {
+    if (requestedIndex !== null) {
+      if (requestedIndex < 1 || requestedIndex > rows.length) {
+        await send(jid, "❌ El número " + requestedIndex + " no existe para *" + pending.person.name + "*.");
+        return;
+      }
+      rows = [rows[requestedIndex - 1]];
+    }
+
+    if (requestedAmount && requestedIndex === null) {
       rows = rows.filter(x => Number(x.amount) === Number(requestedAmount.amount));
     }
 
-    if (requestedDate) {
+    if (requestedDate && requestedIndex === null) {
       rows = rows.filter(x => sameLocalDate(x.createdAt, requestedDate));
     }
 
