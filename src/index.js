@@ -725,6 +725,7 @@ async function newAccount(initialAmount) {
             count: previousSummary.rows.length,
             total: previousSummary.total,
             withdrawals: previousSummary.withdrawnTotal,
+            transfers: previousSummary.transferTotal,
             netTotal: previousSummary.netTotal,
             pending: previousSummary.pendingTotal,
             paid: previousSummary.paidTotal
@@ -743,6 +744,7 @@ async function newAccount(initialAmount) {
             count: previousSummary.rows.length,
             total: previousSummary.total,
             withdrawals: previousSummary.withdrawnTotal,
+            transfers: previousSummary.transferTotal,
             netTotal: previousSummary.netTotal,
             pending: previousSummary.pendingTotal,
             paid: previousSummary.paidTotal
@@ -832,20 +834,33 @@ async function addService(name, amount, jid, transfer) {
 async function servicesSummary() {
   const account = await ensureAccount();
   const c = await collections();
-  const { services } = c;
+  const { services, transfers } = c;
 
   const rows = await services.find({
     accountNumber: account.number
   }).sort({ createdAt: 1 }).toArray();
 
-  // El monto de inicio de "cuenta nueva" forma parte del dinero de la cuenta.
-  // No es un servicio ni un deudor, pero sí debe sumarse al total disponible
-  // y a la suma acumulada que muestran los reportes.
+  // La suma bruta incluye TODOS los movimientos del ciclo:
+  // importe inicial + servicios normales + transferencias.
+  // Las transferencias forman parte del importe generado, pero no entran
+  // a caja, por lo que se descuentan junto con los retiros al calcular
+  // Disponible/Final.
   const serviceTotal = rows.reduce((s, x) => s + Number(x.amount || 0), 0);
-  const total = Number(account.initialAmount || 0) + serviceTotal;
-  const withdrawalRows = await c.withdrawals.find({ accountNumber: account.number }).sort({ createdAt: 1 }).toArray();
+  const transferRows = await transfers.find({
+    accountNumber: account.number
+  }).sort({ createdAt: 1 }).toArray();
+  const transferTotal = transferRows.reduce((s, x) => s + Number(x.amount || 0), 0);
+  const total = Number(account.initialAmount || 0) + serviceTotal + transferTotal;
+
+  const withdrawalRows = await c.withdrawals.find({
+    accountNumber: account.number
+  }).sort({ createdAt: 1 }).toArray();
   const withdrawnTotal = withdrawalRows.reduce((s, x) => s + Number(x.amount || 0), 0);
-  const netTotal = total - withdrawnTotal;
+
+  // Caja real = TODO lo generado - transferencias - retiros.
+  // Pendiente/Pagado NO intervienen en este cálculo: solo sirven para control.
+  const netTotal = total - transferTotal - withdrawnTotal;
+
   const pending = rows.filter(x => x.status === "pending");
   const paid = rows.filter(x => x.status === "paid");
 
@@ -853,6 +868,9 @@ async function servicesSummary() {
     account,
     rows,
     total,
+    serviceTotal,
+    transferRows,
+    transferTotal,
     withdrawnTotal,
     netTotal,
     withdrawalRows,
@@ -1974,6 +1992,7 @@ async function handleMessage(msg) {
         ? "\n📌 *CUENTA ANTERIOR*\n" +
           "🧾 Servicios: " + ps.count + "\n" +
           "💰 Suma: " + money(ps.total) + "\n" +
+          "🔄 Transferencias: " + money(ps.transfers || 0) + "\n" +
           "💸 Retiros: " + money(ps.withdrawals) + "\n" +
           "📊 Final: " + money(ps.netTotal) + "\n" +
           "⏳ Pendiente: " + money(ps.pending) + "\n" +
@@ -2071,6 +2090,7 @@ async function handleMessage(msg) {
             count: s.rows.length,
             total: s.total,
             withdrawals: s.withdrawnTotal,
+            transfers: s.transferTotal,
             netTotal: s.netTotal,
             pending: s.pendingTotal,
             paid: s.paidTotal
@@ -2080,22 +2100,31 @@ async function handleMessage(msg) {
     );
 
     // MENSAJE 3: CORTE
-    const serviceAmounts = [250, 35, 300];
-    const serviceLines = serviceAmounts
-      .map(amount => {
-        const count = s.rows.filter(x => Number(x.amount) === amount).length;
-        return money(amount) + "*" + count + "=" + money(amount * count);
-      })
+    const byAmount = new Map();
+    for (const row of s.rows) {
+      const amount = Number(row.amount || 0);
+      byAmount.set(amount, (byAmount.get(amount) || 0) + 1);
+    }
+
+    const serviceLines = [...byAmount.entries()]
+      .sort((a, b) => b[0] - a[0])
+      .map(([amount, count]) =>
+        money(amount) + "*" + count + "=" + money(amount * count)
+      )
       .join("\n");
+
+    const serviceSection = serviceLines || "Sin servicios normales.";
 
     await send(jid,
       "✂️ *CORTE*\n\n" +
       "📋 *Servicios:*\n" +
-      serviceLines + "\n" +
-      "💰 Suma: *" + money(s.total) + "*\n" +
+      serviceSection + "\n\n" +
+      "💰 Suma total: *" + money(s.total) + "*\n" +
+      "🔄 Transferencias: *" + money(s.transferTotal) + "*\n" +
       "💸 Retiros: *" + money(s.withdrawnTotal) + "*\n" +
       "⏳ Pendiente: *" + money(s.pendingTotal) + "*\n" +
       "✅ Pagado: *" + money(s.paidTotal) + "*\n\n" +
+      "💵 Disponible: *" + money(s.netTotal) + "*\n" +
       "📊 Final: *" + money(s.netTotal) + "*"
     );
     return;
