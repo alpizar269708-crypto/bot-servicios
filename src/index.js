@@ -1021,13 +1021,18 @@ function formatDebtChoices(person, rows) {
   ).join("\n");
 }
 
+const PENDING_ACTION_TTL_MS = 5 * 60 * 1000;
+
 async function savePendingAction(jid, action) {
   const { pendingActions } = await collections();
+  const now = new Date();
+
   await pendingActions.deleteMany({ jid });
   await pendingActions.insertOne({
     jid,
     ...action,
-    createdAt: new Date()
+    createdAt: now,
+    expiresAt: new Date(now.getTime() + PENDING_ACTION_TTL_MS)
   });
 }
 
@@ -1035,6 +1040,19 @@ async function getPendingAction(jid) {
   const { pendingActions } = await collections();
   const action = await pendingActions.findOne({ jid });
   if (!action) return null;
+
+  // Las selecciones solo son válidas durante 5 minutos.
+  // Para documentos antiguos que no tengan expiresAt, usamos createdAt.
+  const createdAt = action.createdAt ? new Date(action.createdAt) : null;
+  const expiresAt = action.expiresAt
+    ? new Date(action.expiresAt)
+    : (createdAt ? new Date(createdAt.getTime() + PENDING_ACTION_TTL_MS) : null);
+
+  if (expiresAt && Date.now() >= expiresAt.getTime()) {
+    await pendingActions.deleteOne({ _id: action._id });
+    return null;
+  }
+
   return action;
 }
 
@@ -1164,6 +1182,14 @@ async function handleMessage(msg) {
       } else if (selectedDate) {
         const matches = pendingAction.rows.filter(x => sameLocalDate(x.createdAt, selectedDate));
         if (matches.length === 1) selected = matches[0]._id;
+      }
+
+      // Si el usuario escribió solamente un número, pero ese número no
+      // corresponde a una deuda de la lista, no dejamos que el mensaje
+      // se interprete como otra cosa.
+      if (selectedNumber && !selected) {
+        await send(jid, "❌ Ese número no corresponde a una deuda de *" + pendingAction.personName + "*.");
+        return;
       }
 
       if (selected) {
@@ -1602,7 +1628,7 @@ async function handleMessage(msg) {
         "🗑️ *¿QUÉ SERVICIO QUIERES ELIMINAR?*\n\n" +
         "👤 " + pending.person.name + "\n" +
         formatDebtChoices(pending.person, rows) +
-        "\n\nResponde con el *número*, el *importe* o la *fecha*."
+        "\n\nPuedes responder al mensaje o escribir el *número* (1, 2, 3...) durante los próximos 5 minutos."
       );
       return;
     }
@@ -1728,7 +1754,7 @@ async function handleMessage(msg) {
       "💵 *¿QUÉ DEUDA QUIERES PAGAR?*\n\n" +
       "👤 " + pending.person.name + "\n" +
       formatDebtChoices(pending.person, rows) +
-      "\n\nResponde con el *número*, el *importe* o la *fecha*."
+      "\n\nPuedes responder al mensaje o simplemente escribe el *número* (1, 2, 3...) durante los próximos 5 minutos."
     );
     return;
   }
