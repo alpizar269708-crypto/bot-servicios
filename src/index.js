@@ -1763,12 +1763,7 @@ async function handleMessage(msg) {
 
     await send(jid,
       "📋 *CUENTA*\n\n" +
-      body + "\n\n" +
-      "📊 Suma: *" + money(s.total) + "*\n" +
-      "💸 Retiros: *" + money(s.withdrawnTotal) + "*\n" +
-      "💰 Disponible: *" + money(s.netTotal) + "*\n" +
-      "⏳ Pendiente: *" + money(s.pendingTotal) + "*\n" +
-      "✅ Pagado: *" + money(s.paidTotal) + "*"
+      body
     );
     return;
   }
@@ -2006,10 +2001,8 @@ async function handleMessage(msg) {
       : "No hay servicios registrados.";
 
     await send(jid,
-      "📋 *LISTA DE SERVICIOS*\n\n" +
-      serviceBody + "\n\n" +
-      "📊 Servicios: *" + s.rows.length + "*\n" +
-      "💰 Suma: *" + money(s.total) + "*"
+      "📋 *CUENTA*\n\n" +
+      serviceBody
     );
 
     // MENSAJE 2: LISTA DE DEUDORES
