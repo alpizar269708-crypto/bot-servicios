@@ -394,6 +394,9 @@ function commandOf(text) {
     if (fuzzyWord(first, ["corte"], 1)) return "corte";
   }
 
+  // Eliminar también acepta argumentos: "eliminar Mari 250".
+  if (fuzzyWord(first, ["eliminar", "elimina", "borrar", "borra", "quita", "quitar"], 2)) return "eliminar";
+
   // Pago múltiple: permite argumentos como "deudoresp 1-3 5".
   if (fuzzyWord(first, ["deudoresp"], 1)) return "deudoresp";
 
@@ -1170,7 +1173,10 @@ async function handleMessage(msg) {
         selected = pendingAction.serviceIds[selectedNumber - 1];
       } else if (selectedAmount) {
         const matches = pendingAction.rows.filter(x => Number(x.amount) === Number(selectedAmount.amount));
-        if (matches.length === 1) selected = String(matches[0]._id);
+        if (matches.length === 1) selected = matches[0]._id;
+      } else if (selectedDate) {
+        const matches = pendingAction.rows.filter(x => sameLocalDate(x.createdAt, selectedDate));
+        if (matches.length === 1) selected = matches[0]._id;
       }
 
       if (selected) {
