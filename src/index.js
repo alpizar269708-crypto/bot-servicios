@@ -967,6 +967,29 @@ function formatServiceDate(date) {
     dateStyle: "short"
   });
 }
+function parseDateInput(text) {
+  const m = String(text || "").match(/\b(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})\b/);
+  if (!m) return null;
+  let year = Number(m[3]);
+  if (year < 100) year += 2000;
+  return new Date(year, Number(m[2]) - 1, Number(m[1]));
+}
+
+function sameLocalDate(a, b) {
+  const da = new Date(a);
+  return da.toLocaleDateString("es-MX", { timeZone: "America/Mexico_City" }) ===
+    b.toLocaleDateString("es-MX");
+}
+
+async function allServicesForPerson(name) {
+  const c = await collections();
+  const p = await c.people.findOne({ normalizedName: norm(name) });
+  if (!p) return { ok: false, reason: "not_found" };
+  const rows = await c.services.find({ personId: p._id }).sort({ createdAt: 1 }).toArray();
+  return { ok: true, person: p, rows };
+}
+
+
 
 function formatDebtChoices(person, rows) {
   return rows.map((x, i) =>
@@ -1105,6 +1128,7 @@ async function handleMessage(msg) {
     const choiceText = text.trim();
     const selectedNumber = /^\d+$/.test(choiceText) ? Number(choiceText) : null;
     const selectedAmount = amountFrom(choiceText);
+    const selectedDate = parseDateInput(choiceText);
 
     if (pendingAction.type === "pay_select") {
       let selected = null;
@@ -1112,7 +1136,10 @@ async function handleMessage(msg) {
         selected = pendingAction.serviceIds[selectedNumber - 1];
       } else if (selectedAmount) {
         const matches = pendingAction.rows.filter(x => Number(x.amount) === Number(selectedAmount.amount));
-        if (matches.length === 1) selected = String(matches[0]._id);
+        if (matches.length === 1) selected = matches[0]._id;
+      } else if (selectedDate) {
+        const matches = pendingAction.rows.filter(x => sameLocalDate(x.createdAt, selectedDate));
+        if (matches.length === 1) selected = matches[0]._id;
       }
 
       if (selected) {
@@ -1521,7 +1548,7 @@ async function handleMessage(msg) {
       return;
     }
 
-    const pending = await pendingServicesForPerson(name);
+    const pending = await allServicesForPerson(name);
     if (!pending.ok) {
       await send(jid, "❌ No encuentro a *" + name + "*.");
       return;
@@ -1533,7 +1560,7 @@ async function handleMessage(msg) {
     }
 
     if (!rows.length) {
-      await send(jid, "ℹ️ No encontré ese servicio pendiente de *" + pending.person.name + "*.");
+      await send(jid, "ℹ️ No encontré ese servicio de *" + pending.person.name + "*.");
       return;
     }
 
@@ -1548,7 +1575,7 @@ async function handleMessage(msg) {
         "🗑️ *¿QUÉ SERVICIO QUIERES ELIMINAR?*\n\n" +
         "👤 " + pending.person.name + "\n" +
         formatDebtChoices(pending.person, rows) +
-        "\n\nResponde con el *número* o el *importe*."
+        "\n\nResponde con el *número*, el *importe* o la *fecha*."
       );
       return;
     }
@@ -1616,6 +1643,7 @@ async function handleMessage(msg) {
 
     let name = paymentNameFromText(args);
     const requestedAmount = amountFrom(args);
+    const requestedDate = parseDateInput(args);
 
     if (!name && quoted) name = quotedServiceName(quoted);
 
@@ -1635,6 +1663,10 @@ async function handleMessage(msg) {
 
     if (requestedAmount) {
       rows = rows.filter(x => Number(x.amount) === Number(requestedAmount.amount));
+    }
+
+    if (requestedDate) {
+      rows = rows.filter(x => sameLocalDate(x.createdAt, requestedDate));
     }
 
     if (!rows.length) {
