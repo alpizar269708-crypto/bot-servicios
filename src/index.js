@@ -2124,7 +2124,6 @@ async function handleMessage(msg) {
       "💸 Retiros: *" + money(s.withdrawnTotal) + "*\n" +
       "⏳ Pendiente: *" + money(s.pendingTotal) + "*\n" +
       "✅ Pagado: *" + money(s.paidTotal) + "*\n\n" +
-      "💵 Disponible: *" + money(s.netTotal) + "*\n" +
       "📊 Final: *" + money(s.netTotal) + "*"
     );
     return;
