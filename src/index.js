@@ -1206,7 +1206,6 @@ function menu() {
     "",
     "🔄 *TRANSFERENCIA*",
     "Registra el pago por transferencia.",
-    "No se suma al dinero del corte.",
     "",
     "💸 *RETIRO*",
     "Registra dinero que se entrega o se deposita a Beto.",
@@ -1764,8 +1763,8 @@ async function handleMessage(msg) {
       await send(jid,
         "✅ *PAGO REGISTRADO*\n" +
         "👤 " + result.person.name + "\n" +
-        "💵 " + money(result.total) + "\n" +
-        "🧾 " + result.count + " servicio" + (result.count === 1 ? "" : "s")
+        "💵 " + money(result.total) +
+        (result.count > 1 ? "\n🧾 " + result.count + " servicios" : "")
       );
       return;
     }
