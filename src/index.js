@@ -1049,36 +1049,59 @@ async function paymentNameMatches(name) {
   const query = norm(name);
   if (!query) return [];
 
-  const escaped = query.replace(/[.*+?^()|[\]\\]/g, "\\async function pendingServicesForPerson(name) {
-  const c = await collections();
-  const p = await c.people.findOne({ normalizedName: norm(name) });
-  if (!p) return { ok: false, reason: "not_found" };
-
-  const rows = await c.services.find({
-    personId: p._id,
-    status: "pending"
-  }).sort({ createdAt: 1 }).toArray();
-
-  return { ok: true, person: p, rows };
-}");
+  // Primero buscamos coincidencias directas o por inicio del nombre.
+  const escaped = query.replace(/[.*+?^()|[\]\\]/g, "\\$&");
   const regex = new RegExp("^" + escaped + "(?:\\s|$)", "i");
 
-  const people = await c.people.find({
+  const directPeople = await c.people.find({
     normalizedName: regex
   }).sort({ normalizedName: 1 }).limit(20).toArray();
 
-  const candidates = [];
-  for (const p of people) {
+  const directCandidates = [];
+  for (const p of directPeople) {
     const pending = await c.services.findOne({
       personId: p._id,
       status: "pending"
     });
-    if (pending) candidates.push(p);
+    if (pending) directCandidates.push(p);
   }
 
-  return candidates;
-}
+  if (directCandidates.length) return directCandidates;
 
+  // Si no coincide exactamente, buscamos errores pequeños de escritura.
+  // Ej.: "ofilia" -> "odilia", "mariaa" -> "maria".
+  const people = await c.people.find({}).sort({ normalizedName: 1 }).limit(500).toArray();
+  const fuzzyCandidates = [];
+
+  for (const p of people) {
+    const normalized = norm(p.normalizedName || p.name);
+    if (!normalized) continue;
+
+    const distance = editDistance(query, normalized);
+    const maxDistance =
+      query.length >= 8 ? 2 :
+      query.length >= 5 ? 1 :
+      0;
+
+    if (distance > maxDistance) continue;
+
+    const pending = await c.services.findOne({
+      personId: p._id,
+      status: "pending"
+    });
+
+    if (pending) {
+      fuzzyCandidates.push({ person: p, distance });
+    }
+  }
+
+  fuzzyCandidates.sort((a, b) =>
+    a.distance - b.distance ||
+    norm(a.person.name).localeCompare(norm(b.person.name), "es")
+  );
+
+  return fuzzyCandidates.slice(0, 20).map(x => x.person);
+}
 function formatServiceDate(date) {
   return new Date(date).toLocaleDateString("es-MX", {
     timeZone: "America/Mexico_City",
