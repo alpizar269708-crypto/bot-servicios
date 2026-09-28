@@ -1627,15 +1627,19 @@ async function handleMessage(msg) {
   }
 
   if (command === "deudores") {
+    const account = await ensureAccount();
     const { services, transfers } = await collections();
 
-    // Una persona con transferencia no se muestra como deudor.
-    const transferRows = await transfers.find({}).toArray();
+    // Una persona con transferencia en este ciclo no se muestra como deudor.
+    const transferRows = await transfers.find({
+      accountNumber: account.number
+    }).toArray();
     const transferredPeople = new Set(
       transferRows.map(x => String(x.personId))
     );
 
     const rows = await services.find({
+      accountNumber: account.number,
       status: "pending",
       personName: { $not: /^retiro$/i }
     }).sort({ createdAt: 1 }).toArray();
