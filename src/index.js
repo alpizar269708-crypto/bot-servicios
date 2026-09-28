@@ -840,25 +840,23 @@ async function servicesSummary() {
     accountNumber: account.number
   }).sort({ createdAt: 1 }).toArray();
 
-  // La suma bruta incluye TODOS los movimientos del ciclo:
-  // importe inicial + servicios normales + transferencias.
-  // Las transferencias forman parte del importe generado, pero no entran
-  // a caja, por lo que se descuentan junto con los retiros al calcular
-  // Disponible/Final.
+  // Los servicios normales sí suman al total.
+  // Las transferencias NO forman parte de la suma de servicios:
+  // son salidas de dinero y deben descontarse directamente.
   const serviceTotal = rows.reduce((s, x) => s + Number(x.amount || 0), 0);
   const transferRows = await transfers.find({
     accountNumber: account.number
   }).sort({ createdAt: 1 }).toArray();
   const transferTotal = transferRows.reduce((s, x) => s + Number(x.amount || 0), 0);
-  const total = Number(account.initialAmount || 0) + serviceTotal + transferTotal;
 
   const withdrawalRows = await c.withdrawals.find({
     accountNumber: account.number
   }).sort({ createdAt: 1 }).toArray();
   const withdrawnTotal = withdrawalRows.reduce((s, x) => s + Number(x.amount || 0), 0);
 
-  // Caja real = TODO lo generado - transferencias - retiros.
-  // Pendiente y pagado se conservan como datos del ciclo.
+  // Total de servicios = inicio + servicios normales.
+  // Disponible/final = total de servicios - transferencias - retiros.
+  const total = Number(account.initialAmount || 0) + serviceTotal;
   const netTotal = total - transferTotal - withdrawnTotal;
 
   const pending = rows.filter(x => x.status === "pending");
