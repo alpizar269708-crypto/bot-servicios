@@ -1445,8 +1445,8 @@ async function handleMessage(msg) {
           await send(jid,
             "✅ *PAGO REGISTRADO*\n" +
             "👤 " + result.person.name + "\n" +
-            "💵 " + money(result.total) + "\n" +
-            "🧾 " + result.count + " servicio"
+            "💵 " + money(result.total) +
+            (result.count > 1 ? "\n🧾 " + result.count + " servicios" : "")
           );
         } else {
           await send(jid, "ℹ️ Esa deuda ya no está pendiente.");
