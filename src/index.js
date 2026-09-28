@@ -1627,16 +1627,28 @@ async function handleMessage(msg) {
   }
 
   if (command === "deudores") {
-    const { services } = await collections();
-    const rows = await services.find({ status: "pending", personName: { $not: /^retiro$/i } }).sort({ createdAt: 1 }).toArray();
+    const { services, transfers } = await collections();
 
-    if (!rows.length) {
+    // Una persona con transferencia no se muestra como deudor.
+    const transferRows = await transfers.find({}).toArray();
+    const transferredPeople = new Set(
+      transferRows.map(x => String(x.personId))
+    );
+
+    const rows = await services.find({
+      status: "pending",
+      personName: { $not: /^retiro$/i }
+    }).sort({ createdAt: 1 }).toArray();
+
+    const filteredRows = rows.filter(x => !transferredPeople.has(String(x.personId)));
+
+    if (!filteredRows.length) {
       await send(jid, "✅ No hay deudores pendientes.");
       return;
     }
 
     const grouped = new Map();
-    for (const x of rows) {
+    for (const x of filteredRows) {
       const key = String(x.personId);
       if (!grouped.has(key)) {
         grouped.set(key, {
@@ -1939,11 +1951,28 @@ async function handleMessage(msg) {
   if (command === "listaservicios") {
     const s = await servicesSummary();
 
-    const body = s.rows.length
-      ? s.rows.map((x, i) =>
-          (i + 1) + ". " + x.personName + " — " + money(x.amount) +
-          (x.status === "paid" ? " ✅" : " ⏳")
-        ).join("\n")
+    const serviceRows = s.rows.map(x => ({
+      ...x,
+      kind: "service"
+    }));
+
+    const transferRows = s.transferRows.map(x => ({
+      ...x,
+      kind: "transfer"
+    }));
+
+    const allRows = [...serviceRows, ...transferRows]
+      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
+    const body = allRows.length
+      ? allRows.map((x, i) => {
+          if (x.kind === "transfer") {
+            return (i + 1) + ". 🔄 " + x.personName + " — " + money(x.amount) + " *TRANSFERENCIA*";
+          }
+
+          return (i + 1) + ". " + x.personName + " — " + money(x.amount) +
+            (x.status === "paid" ? " ✅" : " ⏳");
+        }).join("\n")
       : "No hay servicios registrados.";
 
     await send(jid,
