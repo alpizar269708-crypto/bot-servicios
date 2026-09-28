@@ -2119,7 +2119,7 @@ async function handleMessage(msg) {
 
     await addService(name, a.amount, jid, true);
     const transferSummary = await servicesSummary();
-    const ajuste = Number(transferSummary.transferTotal || 0) + Number(transferSummary.withdrawnTotal || 0);
+    const ajuste = Number(a.amount || 0);
     await send(jid,
       "🔄 *TRANSFERENCIA*\n" +
       "👤 " + name + "\n" +
