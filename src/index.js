@@ -448,6 +448,7 @@ function commandOf(text) {
     if (fuzzyWord(first, ["todopagado", "todospagados"], 2)) return "todopagado";
     if (fuzzyWord(first, ["pagados"], 1)) return "pagados";
     if (fuzzyWord(first, ["pagado"], 1)) return "pag";
+    if (fuzzyWord(first, ["total"], 1)) return "total";
     if (fuzzyWord(first, ["corte"], 1)) return "corte";
   }
 
@@ -1929,6 +1930,12 @@ async function handleMessage(msg) {
     return;
   }
 
+  if (command === "total") {
+    const s = await servicesSummary();
+    await send(jid, money(s.netTotal));
+    return;
+  }
+
   if (command === "listaservicios") {
     const s = await servicesSummary();
 
@@ -2112,10 +2119,12 @@ async function handleMessage(msg) {
 
     await addService(name, a.amount, jid, true);
     const transferSummary = await servicesSummary();
+    const ajuste = Number(transferSummary.transferTotal || 0) + Number(transferSummary.withdrawnTotal || 0);
     await send(jid,
       "🔄 *TRANSFERENCIA*\n" +
       "👤 " + name + "\n" +
       "💵 " + money(a.amount) + "\n\n" +
+      "🧮 Ajuste: -" + money(ajuste) + "\n" +
       "💰 Suma actual: *" + money(transferSummary.netTotal) + "*"
     );
     return;
