@@ -1386,7 +1386,7 @@ async function handleMessage(msg) {
         return;
       }
 
-      await send(jid, "❌ Responde *sí* para confirmar o *no* para cancelar.");
+      await send(jid, "❌ Escribe *sí* o *no*.");
       return;
     }
 
@@ -2020,12 +2020,12 @@ async function handleMessage(msg) {
     if (norm(matchedPerson.name) !== norm(name)) {
       await savePendingAction(jid, {
         type: "name_confirm",
+        queryName: name,
         personName: matchedPerson.name
       });
 
       await send(jid,
-        "👤 ¿Te refieres a *" + matchedPerson.name + "*?\n\n" +
-        "Responde *sí* o *no* durante los próximos 5 minutos."
+        "❓ No encontré *" + name + "*.\n¿Es *" + matchedPerson.name + "*?"
       );
       return;
     }
