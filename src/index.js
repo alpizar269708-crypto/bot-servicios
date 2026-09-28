@@ -1044,6 +1044,41 @@ async function pendingServicesForPerson(name) {
   return { ok: true, person: p, rows };
 }
 
+async function paymentNameMatches(name) {
+  const c = await collections();
+  const query = norm(name);
+  if (!query) return [];
+
+  const escaped = query.replace(/[.*+?^()|[\]\\]/g, "\\async function pendingServicesForPerson(name) {
+  const c = await collections();
+  const p = await c.people.findOne({ normalizedName: norm(name) });
+  if (!p) return { ok: false, reason: "not_found" };
+
+  const rows = await c.services.find({
+    personId: p._id,
+    status: "pending"
+  }).sort({ createdAt: 1 }).toArray();
+
+  return { ok: true, person: p, rows };
+}");
+  const regex = new RegExp("^" + escaped + "(?:\\s|$)", "i");
+
+  const people = await c.people.find({
+    normalizedName: regex
+  }).sort({ normalizedName: 1 }).limit(20).toArray();
+
+  const candidates = [];
+  for (const p of people) {
+    const pending = await c.services.findOne({
+      personId: p._id,
+      status: "pending"
+    });
+    if (pending) candidates.push(p);
+  }
+
+  return candidates;
+}
+
 function formatServiceDate(date) {
   return new Date(date).toLocaleDateString("es-MX", {
     timeZone: "America/Mexico_City",
@@ -1189,6 +1224,8 @@ function menuExtra() {
     "También acepta: cancela, cancel o salir.",
     "",
     "💳 *PAGO CON NOMBRE*",
+    "Si el nombre coincide con una persona más específica, el bot te pregunta antes de pagar.",
+    "Si hay varias personas con el mismo nombre, te deja escoger por número.",
     "Ejemplo: pagar Mari numero 2",
     "También: pagar Mari la 2",
     "",
@@ -1275,6 +1312,109 @@ async function handleMessage(msg) {
     const selectedNumber = selectionNumberFromText(choiceText);
     const selectedAmount = amountFrom(choiceText);
     const selectedDate = parseDateInput(choiceText);
+
+    if (pendingAction.type === "name_confirm") {
+      const answer = norm(choiceText);
+
+      if (answer === "si" || answer === "sí") {
+        await clearPendingAction(jid);
+
+        const pending = await pendingServicesForPerson(pendingAction.personName);
+        if (!pending.ok || !pending.rows.length) {
+          await send(jid, "ℹ️ " + pendingAction.personName + " ya no tiene servicios pendientes.");
+          return;
+        }
+
+        if (pending.rows.length === 1) {
+          const result = await payServices(pending.person.name, [pending.rows[0]._id]);
+          if (!result.ok) {
+            await send(jid, "ℹ️ Esa deuda ya no está pendiente.");
+            return;
+          }
+
+          await send(jid,
+            "✅ *PAGO REGISTRADO*\n" +
+            "👤 " + result.person.name + "\n" +
+            "💵 " + money(result.total) +
+            (result.count > 1 ? "\n🧾 " + result.count + " servicios" : "")
+          );
+          return;
+        }
+
+        await savePendingAction(jid, {
+          type: "pay_select",
+          personName: pending.person.name,
+          serviceIds: pending.rows.map(x => x._id),
+          rows: pending.rows
+        });
+
+        await send(jid,
+          "💵 *¿QUÉ DEUDA QUIERES PAGAR?*\n\n" +
+          "👤 " + pending.person.name + "\n" +
+          formatDebtChoices(pending.person, pending.rows) +
+          "\n\nPuedes responder al mensaje o escribir el *número* (1, 2, 3...) durante los próximos 5 minutos."
+        );
+        return;
+      }
+
+      if (isCancelText(choiceText)) {
+        await clearPendingAction(jid);
+        await send(jid, "✅ Selección cancelada. No se hizo ningún cambio.");
+        return;
+      }
+
+      await send(jid, "❌ Responde *sí* para confirmar o *no* para cancelar.");
+      return;
+    }
+
+    if (pendingAction.type === "name_select") {
+      const selectedNumber = selectionNumberFromText(choiceText);
+
+      if (selectedNumber && pendingAction.candidates[selectedNumber - 1]) {
+        const selected = pendingAction.candidates[selectedNumber - 1];
+        await clearPendingAction(jid);
+
+        const pending = await pendingServicesForPerson(selected.name);
+        if (!pending.ok || !pending.rows.length) {
+          await send(jid, "ℹ️ " + selected.name + " ya no tiene servicios pendientes.");
+          return;
+        }
+
+        if (pending.rows.length === 1) {
+          const result = await payServices(pending.person.name, [pending.rows[0]._id]);
+          if (!result.ok) {
+            await send(jid, "ℹ️ Esa deuda ya no está pendiente.");
+            return;
+          }
+
+          await send(jid,
+            "✅ *PAGO REGISTRADO*\n" +
+            "👤 " + result.person.name + "\n" +
+            "💵 " + money(result.total) +
+            (result.count > 1 ? "\n🧾 " + result.count + " servicios" : "")
+          );
+          return;
+        }
+
+        await savePendingAction(jid, {
+          type: "pay_select",
+          personName: pending.person.name,
+          serviceIds: pending.rows.map(x => x._id),
+          rows: pending.rows
+        });
+
+        await send(jid,
+          "💵 *¿QUÉ DEUDA QUIERES PAGAR?*\n\n" +
+          "👤 " + pending.person.name + "\n" +
+          formatDebtChoices(pending.person, pending.rows) +
+          "\n\nPuedes responder al mensaje o escribir el *número* (1, 2, 3...) durante los próximos 5 minutos."
+        );
+        return;
+      }
+
+      await send(jid, "❌ Escribe el número de la persona que quieres seleccionar.");
+      return;
+    }
 
     if (pendingAction.type === "pay_select") {
       let selected = null;
@@ -1827,8 +1967,47 @@ async function handleMessage(msg) {
       return;
     }
 
-    const pending = await pendingServicesForPerson(name);
+    const nameMatches = await paymentNameMatches(name);
 
+    if (!nameMatches.length) {
+      await send(jid, "❌ No encuentro a *" + name + "*.");
+      return;
+    }
+
+    if (nameMatches.length > 1) {
+      await savePendingAction(jid, {
+        type: "name_select",
+        queryName: name,
+        candidates: nameMatches.map(p => ({
+          personId: p._id,
+          name: p.name
+        }))
+      });
+
+      await send(jid,
+        "👤 *¿A CUÁL TE REFIERES?*\n\n" +
+        nameMatches.map((p, i) => (i + 1) + ". " + p.name).join("\n") +
+        "\n\nEscribe el número durante los próximos 5 minutos."
+      );
+      return;
+    }
+
+    const matchedPerson = nameMatches[0];
+
+    if (norm(matchedPerson.name) !== norm(name)) {
+      await savePendingAction(jid, {
+        type: "name_confirm",
+        personName: matchedPerson.name
+      });
+
+      await send(jid,
+        "👤 ¿Te refieres a *" + matchedPerson.name + "*?\n\n" +
+        "Responde *sí* o *no* durante los próximos 5 minutos."
+      );
+      return;
+    }
+
+    const pending = await pendingServicesForPerson(matchedPerson.name);
     if (!pending.ok) {
       await send(jid, "❌ No encuentro a *" + name + "*.");
       return;
