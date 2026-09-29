@@ -697,8 +697,7 @@ async function ensureIndexes() {
   const c = await collections();
   await c.accounts.createIndex({ number: 1 }, { unique: true });
   await c.accounts.createIndex({ active: 1 });
-  await c.people.createIndex({ normalizedName: 1 }, { unique: true });
-  await c.services.createIndex({ accountNumber: 1, status: 1 });
+  await c.people.createIndex({ normalizedName: 1 }, { unique: true });  await c.services.createIndex({ accountNumber: 1, status: 1 });
   await c.services.createIndex({ personId: 1, status: 1 });
   await c.payments.createIndex({ accountNumber: 1 });
   await c.cycles.createIndex({ accountNumber: 1 }, { unique: true });
@@ -1400,7 +1399,6 @@ async function send(jid, text) {
 
   return result;
 }
-
 async function handleMessage(msg) {
   // No procesar mensajes enviados por el propio bot.
   // Los mensajes escritos manualmente por el usuario desde ese mismo
@@ -1733,12 +1731,6 @@ async function handleMessage(msg) {
     return;
   }
 
-  if (command === "total") {
-    const s = await servicesSummary();
-    await send(jid, money(s.netTotal));
-    return;
-  }
-
   if (command === "deudores") {
     const account = await ensureAccount();
     const { services, transfers } = await collections();
@@ -2065,6 +2057,12 @@ async function handleMessage(msg) {
     return;
   }
 
+  if (command === "total") {
+    const s = await servicesSummary();
+    await send(jid, money(s.netTotal));
+    return;
+  }
+
   if (command === "listaservicios") {
     const s = await servicesSummary();
 
@@ -2106,8 +2104,7 @@ async function handleMessage(msg) {
   }
 
   if (command === "pagados") {
-    const account = await ensureAccount();
-    const { payments } = await collections();
+    const account = await ensureAccount();    const { payments } = await collections();
     const rows = await payments.find({ accountNumber: account.number })
       .sort({ createdAt: 1 }).toArray();
 
@@ -2506,3 +2503,248 @@ async function handleMessage(msg) {
       const amount = Number(row.amount || 0);
       byAmount.set(amount, (byAmount.get(amount) || 0) + 1);
     }
+
+    const serviceLines = [...byAmount.entries()]
+      .sort((a, b) => b[0] - a[0])
+      .map(([amount, count]) =>
+        money(amount) + "*" + count + "=" + money(amount * count)
+      )
+      .join("\n");
+
+    const serviceSection = serviceLines || "Sin servicios normales.";
+
+    await send(jid,
+      "✂️ *CORTE*\n\n" +
+      "📋 *Servicios:*\n" +
+      serviceSection + "\n\n" +
+      "💰 Suma total: *" + money(s.total) + "*\n" +
+      "🔄 Transferencias: *" + money(s.transferTotal) + "*\n" +
+      "💸 Retiros: *" + money(s.withdrawnTotal) + "*\n" +
+      "⏳ Pendiente: *" + money(s.pendingTotal) + "*\n" +
+      "✅ Pagado: *" + money(s.paidTotal) + "*\n\n" +
+      "📊 Final: *" + money(s.netTotal) + "*"
+    );
+    return;
+  }
+
+  const raw = text.replace(/^!/, "").trim();
+  const a = amountFrom(raw);
+
+  // Nunca registrar como servicio una palabra que parezca un comando.
+  // Esto evita que faltas como "retior 1" terminen creando un deudor llamado "retior".
+  if (a) {
+    const firstWord = norm(raw.split(/\s+/)[0] || "");
+    const looksLikeCommand =
+      fuzzyWord(firstWord, ["retiro", "retirar", "ret", "r"], 1) ||
+      fuzzyWord(firstWord, ["transferencia", "transfer", "transf", "trans"], 2) ||
+      fuzzyWord(firstWord, ["p", "pa", "pag", "pago", "pagado", "pagar", "paf"], 1);
+
+    if (looksLikeCommand) return;
+    const name = cleanName(raw, a.raw);
+    if (name.length >= 2) {
+      const transfer = /\b(transferencia|transfer|transf)\b/i.test(raw);
+      const type = await addService(name, a.amount, jid, transfer);
+
+      if (type === "transfer") {
+        const transferSummary = await servicesSummary();
+        await send(jid,
+          "🔄 *TRANSFERENCIA*\n" +
+          "👤 " + name + "\n" +
+          "💵 " + money(a.amount) + "\n\n" +
+          "💰 Suma actual: *" + money(transferSummary.netTotal) + "*"
+        );
+      } else {
+        const summary = await servicesSummary();
+        const serviceCount = summary.rows.length;
+
+        await send(jid,
+          "🧾 *SERVICIO " + serviceCount + "*\n" +
+          "👤 " + name + "\n" +
+          "💵 " + money(a.amount) + "\n\n" +
+          "💰 Total: *" + money(summary.total) + "*");
+      }
+    }
+  }
+}
+
+async function resetWhatsAppAuth() {
+  // La sesión REAL de Baileys se guarda en la colección auth_sessions
+  // mediante src/mongoAuth.js. La colección bot_servicios_auth es antigua
+  // y no debe usarse para borrar la sesión de WhatsApp.
+  await mongoose.connection.db.collection("auth_sessions").deleteMany({});
+  authState = null;
+  currentQR = null;
+  currentPairingCode = null;
+  requestedPairingPhone = null;
+  pairingInProgress = false;
+  botConnected = false;
+  console.log("🧹 Sesión de WhatsApp inválida eliminada.");
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer || botConnected || starting) return;
+
+  reconnectTimer = setTimeout(async () => {
+    reconnectTimer = null;
+    try {
+      await start(loginMode || "qr", loginPhone || "");
+    } catch (error) {
+      console.error("❌ Error en la reconexión:", error?.message || error);
+      scheduleReconnect();
+    }
+  }, 3000);
+}
+
+async function start(mode = "qr", phone = "", onCodeReady = null) {
+  if (starting || sock) return;
+  starting = true;
+  loginMode = mode;
+  loginPhone = phone;
+
+  try {
+    if (!authState) authState = await useMongoDBAuthState("sesion");
+    const { state, saveCreds } = authState;
+    const latest = await fetchLatestWaWebVersion();
+
+    sock = makeWASocket({
+      version: latest.version,
+      logger,
+      auth: state,
+      browser: Browsers.macOS("Chrome"),
+      syncFullHistory: false,
+      // Este bot no necesita descargar historial de chats. Bloqueamos la
+      // sincronización automática de historial para evitar que WhatsApp
+      // muestre el aviso de "Sincronizando con WhatsApp..." en el teléfono.
+      shouldSyncHistoryMessage: () => false,
+      generateHighQualityLinkPreview: false,
+      markOnlineOnConnect: false,
+      printQRInTerminal: false,
+      getMessage: async () => ({ conversation: "" })
+    });
+
+    sock.ev.on("creds.update", saveCreds);
+
+    if (mode === "phone" && !state.creds.me && phone) {
+      setTimeout(async () => {
+        try {
+          requestedPairingPhone = phone;
+          const code = await generatePairingCode();
+          if (code) {
+            console.log("🔢 Código de vinculación generado.");
+            if (onCodeReady) {
+              const codigoFormat = code?.match(/.{1,4}/g)?.join("-") || code;
+              onCodeReady(`
+                <div style="font-family: Arial; text-align: center; margin-top: 50px;">
+                  <h2>🔢 Tu código de vinculación es:</h2>
+                  <h1 style="font-size: 48px; letter-spacing: 5px; color: #25D366; background: #eee; display: inline-block; padding: 10px 20px; border-radius: 10px;">${codigoFormat}</h1>
+                  <p>Abre WhatsApp en tu teléfono, ve a <b>Dispositivos Vinculados &gt; Vincular con número de teléfono</b>, e ingresa este código.</p>
+                </div>
+              `);
+              onCodeReady = null;
+            }
+          }
+        } catch (e) {
+          console.error("❌ Error al generar código de vinculación:", e?.message || e);
+        }
+      }, 3000);
+    }
+
+    sock.ev.on("connection.update", async update => {
+      const connection = update.connection;
+
+      if (update.qr && loginMode === "qr") {
+        currentQR = update.qr;
+        currentPairingCode = null;
+        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(update.qr)}`;
+        if (onCodeReady) {
+          onCodeReady(`
+            <div style="font-family: Arial; text-align: center; margin-top: 50px;">
+              <h2>📱 Escanea este código QR</h2>
+              <img src="${qrUrl}" alt="QR Code" style="border: 1px solid #ccc; border-radius: 10px; padding: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" />
+              <p>Abre WhatsApp &gt; Dispositivos Vinculados &gt; Vincular un dispositivo.</p>
+            </div>
+          `);
+          onCodeReady = null;
+        }
+        console.log("📱 QR generado — disponible únicamente en la página.");
+      }
+
+      if (connection === "open") {
+        starting = false;
+        botConnected = true;
+        currentQR = null;
+        currentPairingCode = null;
+        requestedPairingPhone = null;
+        pairingInProgress = false;
+        console.log("✅ WhatsApp conectado.");
+
+        if (onCodeReady) {
+          onCodeReady(`
+            <div style="font-family: Arial; text-align: center; margin-top: 50px;">
+              <h2 style="color: #25D366;">✅ ¡Bot vinculado correctamente!</h2>
+              <p>El bot ya está en línea y listo para trabajar.</p>
+            </div>
+          `);
+          onCodeReady = null;
+        }
+
+      }
+
+      if (connection === "close") {
+        starting = false;
+        botConnected = false;
+        sock = null;
+
+        const code = update.lastDisconnect?.error?.output?.statusCode;
+        console.log(`⚠️ WhatsApp desconectado (código ${code ?? "desconocido"}). Se reintentará.`);
+
+        if (code === DisconnectReason.loggedOut) {
+          currentQR = null;
+          currentPairingCode = null;
+          requestedPairingPhone = null;
+          console.log("🔴 WhatsApp reportó SESIÓN CERRADA (loggedOut). Eliminando únicamente la sesión de WhatsApp para permitir una nueva vinculación.");
+          try {
+            await resetWhatsAppAuth();
+          } catch (e) {
+            console.error("❌ No se pudo limpiar la sesión de WhatsApp:", e?.message || e);
+          }
+          return;
+        }
+
+        scheduleReconnect();
+      }
+    });
+
+    sock.ev.on("messages.upsert", async event => {
+      for (const msg of event.messages) {
+        try {
+          await handleMessage(msg);
+        } catch (error) {
+          console.error("❌ Error procesando mensaje:", error?.message || error);
+        }
+      }
+    });
+  } catch (error) {
+    starting = false;
+    sock = null;
+    console.error("❌ Error iniciando WhatsApp:", error?.message || error);
+    scheduleReconnect();
+  }
+}
+
+(async () => {
+  await mongo.connect();
+  db = mongo.db(DB_NAME);
+  await mongoose.connect(MONGO_URI);
+  authState = await useMongoDBAuthState("sesion");
+  await ensureIndexes();
+  await ensureAccount();
+  logger.info("MongoDB conectado.");
+
+  if (authState.state.creds.me) {
+    console.log("✅ Sesión previa detectada. Arrancando bot automáticamente...");
+    await start("qr", "");
+  } else {
+    console.log("⚠️ No hay sesión de WhatsApp. Entra al panel web para vincular el bot.");
+  }
+})();
