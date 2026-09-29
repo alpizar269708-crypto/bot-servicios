@@ -824,8 +824,38 @@ async function addService(name, amount, jid, transfer) {
   };
 
   if (transfer) {
-    await c.transfers.insertOne({ ...doc, status: "recorded" });
-    return "transfer";
+    // Si existe un servicio pendiente de esta persona por el mismo importe,
+    // la transferencia paga ese servicio en lugar de crear una deuda nueva.
+    const pendingService = await c.services.findOne({
+      accountNumber: account.number,
+      personId: p._id,
+      amount: Number(amount),
+      status: "pending"
+    }, {
+      sort: { createdAt: 1 }
+    });
+
+    const transferDoc = {
+      ...doc,
+      status: "recorded"
+    };
+
+    if (pendingService) {
+      await c.services.updateOne(
+        { _id: pendingService._id },
+        {
+          $set: {
+            status: "transfer",
+            transferId: pendingService._id
+          }
+        }
+      );
+
+      transferDoc.serviceId = pendingService._id;
+    }
+
+    await c.transfers.insertOne(transferDoc);
+    return pendingService ? "transfer_paid" : "transfer";
   }
 
   await c.services.insertOne({ ...doc, status: "pending" });
@@ -1972,6 +2002,10 @@ async function handleMessage(msg) {
       ? allRows.map((x, i) => {
           if (x.kind === "transfer") {
             return (i + 1) + ". 🔄 " + x.personName + " — " + money(x.amount) + " *TRANSFERENCIA*";
+          }
+
+          if (x.status === "transfer") {
+            return (i + 1) + ". 🔄 " + x.personName + " — " + money(x.amount) + " *PAGADO CON TRANSFERENCIA*";
           }
 
           return (i + 1) + ". " + x.personName + " — " + money(x.amount) +
