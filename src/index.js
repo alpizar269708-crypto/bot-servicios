@@ -419,6 +419,11 @@ function isCancelText(text) {
 }
 
 function commandOf(text) {
+  const rawInput = String(text || "");
+  if (/^\s*!?ajustelista\s*:?(?:\s*\r?\n|\s*$)/i.test(rawInput)) {
+    return "ajustelista";
+  }
+
   let t = norm(text);
   if (t.startsWith(PREFIX)) t = t.slice(PREFIX.length).trim();
 
@@ -928,76 +933,8 @@ async function reconcileTransfers() {
   }
 }
 
-async function repairKnownRosyTransferIssue() {
-  const account = await ensureAccount();
-  const c = await collections();
-
-  // Reparación puntual de los registros creados por el intento fallido de
-  // "ajustetransferenciacaja Rosy 300". Solo afecta a este registro conocido.
-  const rosy = await c.people.findOne({ normalizedName: "rosy" });
-  const badPerson = await c.people.findOne({
-    normalizedName: "ajustetransferenciacaja rosy"
-  });
-
-  if (badPerson) {
-    await c.services.deleteMany({
-      accountNumber: account.number,
-      personId: badPerson._id,
-      amount: 300
-    });
-
-    const remaining = await c.services.countDocuments({
-      personId: badPerson._id
-    });
-
-    if (!remaining) {
-      await c.people.deleteOne({ _id: badPerson._id });
-    }
-  }
-
-  if (!rosy) return;
-
-  // La transferencia real de Rosy debe quedar enlazada a su servicio de $300.
-  const transfer = await c.transfers.findOne({
-    accountNumber: account.number,
-    personId: rosy._id,
-    amount: 300
-  }, {
-    sort: { createdAt: -1 }
-  });
-
-  if (!transfer) return;
-
-  const service = await c.services.findOne({
-    accountNumber: account.number,
-    personId: rosy._id,
-    amount: 300,
-    transferId: { $exists: false },
-    status: { $in: ["pending", "paid"] }
-  }, {
-    sort: { createdAt: 1 }
-  });
-
-  if (!service) return;
-
-  await c.services.updateOne(
-    { _id: service._id },
-    {
-      $set: {
-        status: "transfer",
-        transferId: transfer._id
-      }
-    }
-  );
-
-  await c.transfers.updateOne(
-    { _id: transfer._id },
-    { $set: { serviceId: service._id } }
-  );
-}
-
 async function servicesSummary() {
-  await repairKnownRosyTransferIssue();
+  await reconcileTransfers();
   const account = await ensureAccount();
   const c = await collections();
   const { services, transfers } = c;
@@ -1006,15 +943,13 @@ async function servicesSummary() {
     accountNumber: account.number
   }).sort({ createdAt: 1 }).toArray();
 
-  // Los servicios normales sí suman al total.
-  // Las transferencias NO forman parte de la suma de servicios:
-  // son salidas de dinero y deben descontarse directamente.
-  const serviceTotal = rows.reduce((s, x) => {
-    // Un servicio pagado por transferencia ya está representado en
-    // la colección de transferencias, así que NO vuelve a sumar al total.
-    if (x.status === "transfer" || x.transferId) return s;
-    return s + Number(x.amount || 0);
-  }, 0);
+  // Todos los servicios cuentan para la suma bruta de control,
+  // aunque estén pendientes, pagados o pagados por transferencia.
+  // La transferencia se resta UNA sola vez al calcular el efectivo disponible.
+  const serviceTotal = rows.reduce(
+    (s, x) => s + Number(x.amount || 0),
+    0
+  );
   const transferRows = await transfers.find({
     accountNumber: account.number
   }).sort({ createdAt: 1 }).toArray();
@@ -1363,6 +1298,212 @@ async function debtors() {
   ]).toArray();
 }
 
+function isAdjustListText(text) {
+  return /^\s*!?ajustelista\s*:?(?:\s*\r?\n|\s*$)/i.test(String(text || ""));
+}
+
+function parseAdjustList(text) {
+  const lines = String(text || "")
+    .replace(/\r/g, "")
+    .split("\n")
+    .map(x => x.trim())
+    .filter(Boolean);
+
+  const accountLine = lines.find(line => /\bCUENTA\b/i.test(line));
+  const accountMatch = accountLine?.match(/\bCUENTA\b\s*[*_:=-]*\s*\$?\s*([\d][\d,\.\s]*)/i);
+
+  if (!accountMatch) {
+    return { ok: false, error: "No encontré la cuenta inicial. Usa: 📋 *CUENTA 41,300*" };
+  }
+
+  const initialDigits = accountMatch[1].replace(/[^0-9]/g, "");
+  const initialAmount = initialDigits ? Number(initialDigits) : 0;
+
+  if (!Number.isFinite(initialAmount) || initialAmount < 0) {
+    return { ok: false, error: "La cuenta inicial no es válida." };
+  }
+
+  const rows = [];
+
+  for (const line of lines) {
+    const m = line.match(/^\s*(\d+)\.\s*(.*?)\s*[—-]\s*\$?\s*([\d,]+(?:\.\d+)?)\s*(.*)$/);
+    if (!m) continue;
+
+    const number = Number(m[1]);
+    const name = m[2]
+      .replace(/[*_]/g, "")
+      .replace(/^🔄\s*/u, "")
+      .trim();
+
+    const amount = Number(m[3].replace(/,/g, ""));
+    const tail = m[4] || "";
+
+    const transfer = /TRANSFERENCIA/i.test(tail);
+    const paid = !transfer && tail.includes("✅");
+    const pending = !transfer && tail.includes("⏳");
+
+    if (!name || !Number.isFinite(amount) || amount <= 0) {
+      return { ok: false, error: "Hay un servicio mal formado en la línea " + number + "." };
+    }
+
+    if (!transfer && !paid && !pending) {
+      return { ok: false, error: "No pude identificar el estado del servicio #" + number + "." };
+    }
+
+    rows.push({
+      number,
+      name,
+      amount,
+      status: transfer ? "transfer" : (paid ? "paid" : "pending")
+    });
+  }
+
+  rows.sort((a, b) => a.number - b.number);
+
+  if (!rows.length) {
+    return { ok: false, error: "No encontré servicios en la lista." };
+  }
+
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].number !== i + 1) {
+      return { ok: false, error: "La numeración debe ir del 1 al " + rows.length + " sin saltos." };
+    }
+  }
+
+  return { ok: true, initialAmount, rows };
+}
+
+async function overwriteCurrentAccountFromList(jid, parsed) {
+  const account = await ensureAccount();
+  const c = await collections();
+  const now = new Date();
+
+  // Conserva fechas e IDs cuando el servicio ya existe con el mismo
+  // nombre e importe; la lista nueva redefine sus estados.
+  const oldRows = await c.services.find({
+    accountNumber: account.number
+  }).sort({ createdAt: 1 }).toArray();
+
+  const reusable = new Map();
+  for (const row of oldRows) {
+    const key = norm(row.personName) + "|" + Number(row.amount || 0);
+    if (!reusable.has(key)) reusable.set(key, []);
+    reusable.get(key).push(row);
+  }
+
+  // Esta lista reemplaza TODO el contenido contable del ciclo actual.
+  await c.services.deleteMany({ accountNumber: account.number });
+  await c.payments.deleteMany({ accountNumber: account.number });
+  await c.transfers.deleteMany({ accountNumber: account.number });
+  await c.withdrawals.deleteMany({ accountNumber: account.number });
+  await c.pendingActions.deleteMany({});
+
+  await c.accounts.updateOne(
+    { _id: account._id },
+    {
+      $set: {
+        initialAmount: parsed.initialAmount,
+        active: true,
+        closedAt: null
+      },
+      $unset: { finalSummary: "" }
+    }
+  );
+
+  await c.cycles.updateOne(
+    { accountNumber: account.number },
+    {
+      $set: {
+        initialAmount: parsed.initialAmount,
+        status: "active",
+        closedAt: null
+      },
+      $unset: { summary: "" }
+    },
+    { upsert: true }
+  );
+
+  const paidByPerson = new Map();
+
+  for (const row of parsed.rows) {
+    const p = await person(row.name, jid);
+    const key = norm(p.name) + "|" + Number(row.amount);
+    const bucket = reusable.get(key) || [];
+    const old = bucket.shift();
+    reusable.set(key, bucket);
+
+    const createdAt = old?.createdAt || now;
+    const serviceDoc = {
+      ...(old?._id ? { _id: old._id } : {}),
+      accountNumber: account.number,
+      personId: p._id,
+      personName: p.name,
+      amount: Number(row.amount),
+      status: row.status,
+      createdAt
+    };
+
+    if (row.status === "paid") {
+      serviceDoc.paidAt = old?.paidAt || now;
+    }
+
+    const serviceResult = await c.services.insertOne(serviceDoc);
+    const serviceId = serviceResult.insertedId;
+
+    if (row.status === "transfer") {
+      const transferResult = await c.transfers.insertOne({
+        accountNumber: account.number,
+        personId: p._id,
+        personName: p.name,
+        amount: Number(row.amount),
+        status: "recorded",
+        serviceId,
+        createdAt,
+        jid
+      });
+
+      await c.services.updateOne(
+        { _id: serviceId },
+        { $set: { transferId: transferResult.insertedId } }
+      );
+    }
+
+    if (row.status === "paid") {
+      const personKey = String(p._id);
+
+      if (!paidByPerson.has(personKey)) {
+        paidByPerson.set(personKey, {
+          accountNumber: account.number,
+          personId: p._id,
+          personName: p.name,
+          amount: 0,
+          serviceIds: [],
+          createdAt: old?.paidAt || old?.createdAt || now
+        });
+      }
+
+      const payment = paidByPerson.get(personKey);
+      payment.amount += Number(row.amount);
+      payment.serviceIds.push(serviceId);
+    }
+  }
+
+  const paymentDocs = [...paidByPerson.values()];
+  if (paymentDocs.length) {
+    await c.payments.insertMany(paymentDocs);
+  }
+
+  const summary = await servicesSummary();
+
+  return {
+    account: summary.account,
+    serviceCount: summary.rows.length,
+    total: summary.total,
+    transferTotal: summary.transferTotal,
+    netTotal: summary.netTotal
+  };
+}
+
 function menu() {
   return [
     "📋 *MENÚ*",
@@ -1447,6 +1588,7 @@ function menuSecreto() {
     "🔓 activarbotservicios — activa el bot en un grupo.",
     "🔒 desactivarbotservicios — desactiva el bot.",
     "💵 pagados — muestra los servicios que ya fueron pagados.",
+    "🛠️ ajustelista — reemplaza la cuenta actual con una lista completa.",
     "🧾 ajustetransferenciacaja Rosy 300 — ajuste manual específico para descontar una transferencia de caja."
   ].join("\n");
 }
@@ -1492,7 +1634,7 @@ async function handleMessage(msg) {
   // Si el bot está esperando que el usuario elija una deuda, una respuesta
   // numérica o por importe se procesa antes que cualquier otro comando.
   const pendingAction = await getPendingAction(jid);
-  if (pendingAction && !/PAGO\s+REGISTRADO/i.test(quoted || "") && text.trim()) {
+  if (pendingAction && !isAdjustListText(text) && !/PAGO\s+REGISTRADO/i.test(quoted || "") && text.trim()) {
     const choiceText = text.trim();
 
     if (isCancelText(choiceText)) {
@@ -1754,6 +1896,27 @@ async function handleMessage(msg) {
     return;
   }
 
+  if (command === "ajustelista") {
+    const parsed = parseAdjustList(text);
+
+    if (!parsed.ok) {
+      await send(jid, "❌ " + parsed.error);
+      return;
+    }
+
+    const result = await overwriteCurrentAccountFromList(jid, parsed);
+
+    await send(jid,
+      "✅ *LISTA AJUSTADA*\n" +
+      "📋 Cuenta inicial: *" + money(result.account.initialAmount) + "*\n" +
+      "🧾 Servicios: *" + result.serviceCount + "*\n" +
+      "💰 Suma: *" + money(result.total) + "*\n" +
+      "🔄 Transferencias: *" + money(result.transferTotal) + "*\n" +
+      "📊 Total disponible: *" + money(result.netTotal) + "*"
+    );
+    return;
+  }
+
   if (command === "todopagado") {
     const { services } = await collections();
     const pending = await services.find({
@@ -1800,31 +1963,23 @@ async function handleMessage(msg) {
 
   if (command === "deudores") {
     const account = await ensureAccount();
-    const { services, transfers } = await collections();
+    const { services } = await collections();
 
-    // Una persona con transferencia en este ciclo no se muestra como deudor.
-    const transferRows = await transfers.find({
-      accountNumber: account.number
-    }).toArray();
-    const transferredPeople = new Set(
-      transferRows.map(x => String(x.personId))
-    );
-
+    // Una transferencia cambia SOLO ese servicio a "transfer".
+    // Otras deudas de la misma persona siguen apareciendo.
     const rows = await services.find({
       accountNumber: account.number,
       status: "pending",
       personName: { $not: /^retiro$/i }
     }).sort({ createdAt: 1 }).toArray();
 
-    const filteredRows = rows.filter(x => !transferredPeople.has(String(x.personId)));
-
-    if (!filteredRows.length) {
+    if (!rows.length) {
       await send(jid, "✅ No hay deudores pendientes.");
       return;
     }
 
     const grouped = new Map();
-    for (const x of filteredRows) {
+    for (const x of rows) {
       const key = String(x.personId);
       if (!grouped.has(key)) {
         grouped.set(key, {
@@ -2124,12 +2279,6 @@ async function handleMessage(msg) {
     return;
   }
 
-  if (command === "total") {
-    const s = await servicesSummary();
-    await send(jid, money(s.netTotal));
-    return;
-  }
-
   if (command === "listaservicios") {
     const s = await servicesSummary();
 
@@ -2155,7 +2304,7 @@ async function handleMessage(msg) {
           }
 
           if (x.status === "transfer" || x.transferId) {
-            return (i + 1) + ". 🔄 " + x.personName + " — " + money(x.amount) + " *PAGADO CON TRANSFERENCIA*";
+            return (i + 1) + ". 🔄 " + x.personName + " — " + money(x.amount) + " *TRANSFERENCIA*";
           }
 
           return (i + 1) + ". " + x.personName + " — " + money(x.amount) +
@@ -2164,7 +2313,8 @@ async function handleMessage(msg) {
       : "No hay servicios registrados.";
 
     await send(jid,
-      "📋 *CUENTA*\n\n" +      body
+      "📋 *CUENTA " + Number(s.account.initialAmount || 0).toLocaleString("es-MX") + "*\n\n" +
+      body
     );
     return;
   }
@@ -2314,10 +2464,13 @@ async function handleMessage(msg) {
     let args = text.trim();
     if (args.startsWith(PREFIX)) args = args.slice(PREFIX.length).trim();
 
-    // Permite dos formas:
-    // 1) "transferencia Fulano 250"
-    // 2) Responder a "Fulano 250" y escribir solo "transferencia"
-    args = args.split(/\s+/).slice(1).join(" ").trim();
+    // Acepta "transferencia Rosy 300", "Rosy 300 transferencia"
+    // y responder a un servicio escribiendo solo "transferencia".
+    args = args.split(/\s+/)
+      .filter(word => !isTransferWord(word))
+      .join(" ")
+      .trim();
+
     if (!args && quoted) args = quoted.replace(/^!/, "").trim();
 
     const a = amountFrom(args);
@@ -2477,14 +2630,14 @@ async function handleMessage(msg) {
     const serviceBody = s.rows.length
       ? s.rows.map((x, i) => {
           const status = (x.status === "transfer" || x.transferId)
-            ? " 🔄 *PAGADO CON TRANSFERENCIA*"
+            ? " 🔄 *TRANSFERENCIA*"
             : (x.status === "paid" ? " ✅" : " ⏳");
           return (i + 1) + ". " + x.personName + " — " + money(x.amount) + status;
         }).join("\n")
       : "No hay servicios registrados.";
 
     await send(jid,
-      "📋 *CUENTA*\n\n" +
+      "📋 *CUENTA " + Number(s.account.initialAmount || 0).toLocaleString("es-MX") + "*\n\n" +
       serviceBody
     );
 
