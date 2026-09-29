@@ -2034,12 +2034,6 @@ async function handleMessage(msg) {
       kind: "transfer"
     }));
 
-    const linkedTransferIds = new Set(
-      s.rows
-        .filter(x => x.status === "transfer" && x.transferId)
-        .map(x => String(x.transferId))
-    );
-
     const standaloneTransfers = transferRows.filter(x => !x.serviceId);
 
     const allRows = [...serviceRows, ...standaloneTransfers]
