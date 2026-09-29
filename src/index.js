@@ -2780,7 +2780,7 @@ async function handleMessage(msg) {
           "🧾 *SERVICIO " + serviceCount + "*\n" +
           "👤 " + name + "\n" +
           "💵 " + money(a.amount) + "\n\n" +
-          "💰 Total: *" + money(summary.total) + "*");
+          "💰 Total disponible: *" + money(summary.netTotal) + "*");
       }
     }
   }
