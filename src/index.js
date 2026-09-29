@@ -434,7 +434,10 @@ function commandOf(text) {
     return "deudores";
   }
 
-  // Ajuste administrativo MUY específico: solo reconoce el nombre completo.\n  if (joined === "ajustetransferenciacaja") return "ajustetransferenciacaja";\n\n  if (fuzzyWord(joined, ["menu", "ayuda"], 2)) return "menu";
+  // Ajuste administrativo MUY específico: solo reconoce el nombre completo.
+  if (joined === "ajustetransferenciacaja") return "ajustetransferenciacaja";
+
+  if (fuzzyWord(joined, ["menu", "ayuda"], 2)) return "menu";
   if (fuzzyWord(joined, ["menuextra", "comandos", "ayudaextra", "ayudacomandos"], 2)) return "menuextra";
   if (fuzzyWord(joined, ["menusecreto"], 2)) return "menusecreto";
   if (words.length === 1 && isCancelText(first)) return "cancelar";
