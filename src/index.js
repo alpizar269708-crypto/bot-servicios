@@ -1962,14 +1962,13 @@ async function handleMessage(msg) {
     return;
   }
 
-  if (command === "deudores") {
-    const account = await ensureAccount();
+  if (command === "deudores" || command === "recuperardeudores") {
     const { services } = await collections();
 
-    // Una transferencia cambia SOLO ese servicio a "transfer".
-    // Otras deudas de la misma persona siguen apareciendo.
+    // Los deudores son históricos: sobreviven al corte y a las cuentas nuevas.
+    // recuperardeudores SOLO los muestra/recupera en la lista; no crea servicios
+    // nuevos y no modifica el total, transferencias, retiros ni el corte actual.
     const rows = await services.find({
-      accountNumber: account.number,
       status: "pending",
       personName: { $not: /^retiro$/i }
     }).sort({ createdAt: 1 }).toArray();
