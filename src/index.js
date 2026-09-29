@@ -862,6 +862,45 @@ async function addService(name, amount, jid, transfer) {
   return "service";
 }
 
+async function reconcileTransfers() {
+  const account = await ensureAccount();
+  const c = await collections();
+
+  const transfers = await c.transfers.find({
+    accountNumber: account.number
+  }).sort({ createdAt: 1 }).toArray();
+
+  for (const transfer of transfers) {
+    if (transfer.serviceId) continue;
+
+    const service = await c.services.findOne({
+      accountNumber: account.number,
+      personId: transfer.personId,
+      amount: Number(transfer.amount || 0),
+      status: "pending"
+    }, {
+      sort: { createdAt: 1 }
+    });
+
+    if (!service) continue;
+
+    await c.services.updateOne(
+      { _id: service._id },
+      {
+        $set: {
+          status: "transfer",
+          transferId: transfer._id
+        }
+      }
+    );
+
+    await c.transfers.updateOne(
+      { _id: transfer._id },
+      { $set: { serviceId: service._id } }
+    );
+  }
+}
+
 async function servicesSummary() {
   const account = await ensureAccount();
   const c = await collections();
@@ -1995,7 +2034,15 @@ async function handleMessage(msg) {
       kind: "transfer"
     }));
 
-    const allRows = [...serviceRows, ...transferRows]
+    const linkedTransferIds = new Set(
+      s.rows
+        .filter(x => x.status === "transfer" && x.transferId)
+        .map(x => String(x.transferId))
+    );
+
+    const standaloneTransfers = transferRows.filter(x => !x.serviceId);
+
+    const allRows = [...serviceRows, ...standaloneTransfers]
       .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
     const body = allRows.length
