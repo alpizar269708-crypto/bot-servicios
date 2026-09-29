@@ -997,6 +997,7 @@ async function repairKnownRosyTransferIssue() {
 }
 
 async function servicesSummary() {
+  await repairKnownRosyTransferIssue();
   const account = await ensureAccount();
   const c = await collections();
   const { services, transfers } = c;
