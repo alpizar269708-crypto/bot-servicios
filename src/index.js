@@ -445,6 +445,7 @@ function commandOf(text) {
   if (fuzzyWord(joined, ["menu", "ayuda"], 2)) return "menu";
   if (fuzzyWord(joined, ["menuextra", "comandos", "ayudaextra", "ayudacomandos"], 2)) return "menuextra";
   if (fuzzyWord(joined, ["menusecreto"], 2)) return "menusecreto";
+  if (fuzzyWord(joined, ["recuperardeudores"], 2)) return "recuperardeudores";
   if (words.length === 1 && isCancelText(first)) return "cancelar";
   if (fuzzyWord(joined, ["activarbotservicios", "activarbotaqui"], 2)) return "activar";
   if (fuzzyWord(joined, ["desactivarbotservicios", "desactivarbotaqui"], 2)) return "desactivar";
