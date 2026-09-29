@@ -2642,6 +2642,9 @@ async function handleMessage(msg) {
     );
 
     // MENSAJE 2: LISTA DE DEUDORES
+    // Los deudores son HISTÓRICOS y nunca se borran al cerrar una cuenta.
+    // Después de un corte siguen apareciendo hasta que realmente se paguen.
+    // Por eso aquí NO filtramos por accountNumber.
     const debtorRows = await services.find({
       status: "pending",
       personName: { $not: /^retiro$/i }
