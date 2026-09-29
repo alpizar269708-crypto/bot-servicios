@@ -830,32 +830,55 @@ async function addService(name, amount, jid, transfer) {
       accountNumber: account.number,
       personId: p._id,
       amount: Number(amount),
+      transferId: { $exists: false },
       status: "pending"
     }, {
       sort: { createdAt: 1 }
     });
+
+    // Si el servicio ya fue marcado como pagado y después se registra
+    // que ese pago fue por transferencia, lo enlazamos sin duplicarlo
+    // ni convertirlo nuevamente en deuda.
+    const paidService = pendingService ? null : await c.services.findOne({
+      accountNumber: account.number,
+      personId: p._id,
+      amount: Number(amount),
+      transferId: { $exists: false },
+      status: "paid"
+    }, {
+      sort: { createdAt: 1 }
+    });
+
+    const linkedService = pendingService || paidService;
 
     const transferDoc = {
       ...doc,
       status: "recorded"
     };
 
-    if (pendingService) {
-      await c.services.updateOne(
-        { _id: pendingService._id },
-        {
-          $set: {
-            status: "transfer",
-            transferId: pendingService._id
-          }
+    if (linkedService) {
+      const update = {
+        $set: {
+          transferId: linkedService._id
         }
+      };
+
+      // Si seguía pendiente, la transferencia la deja pagada por transferencia.
+      // Si ya estaba pagada, conserva "paid" y solo enlaza el movimiento.
+      if (linkedService.status === "pending") {
+        update.$set.status = "transfer";
+      }
+
+      await c.services.updateOne(
+        { _id: linkedService._id },
+        update
       );
 
-      transferDoc.serviceId = pendingService._id;
+      transferDoc.serviceId = linkedService._id;
     }
 
     await c.transfers.insertOne(transferDoc);
-    return pendingService ? "transfer_paid" : "transfer";
+    return linkedService ? "transfer_paid" : "transfer";
   }
 
   await c.services.insertOne({ ...doc, status: "pending" });
@@ -873,11 +896,14 @@ async function reconcileTransfers() {
   for (const transfer of transfers) {
     if (transfer.serviceId) continue;
 
+    // Primero intenta enlazar una deuda pendiente; si el servicio ya fue
+    // marcado como pagado, también puede enlazarse sin cambiar su estado.
     const service = await c.services.findOne({
       accountNumber: account.number,
       personId: transfer.personId,
       amount: Number(transfer.amount || 0),
-      status: "pending"
+      transferId: { $exists: false },
+      status: { $in: ["pending", "paid"] }
     }, {
       sort: { createdAt: 1 }
     });
@@ -913,7 +939,12 @@ async function servicesSummary() {
   // Los servicios normales sí suman al total.
   // Las transferencias NO forman parte de la suma de servicios:
   // son salidas de dinero y deben descontarse directamente.
-  const serviceTotal = rows.reduce((s, x) => s + Number(x.amount || 0), 0);
+  const serviceTotal = rows.reduce((s, x) => {
+    // Un servicio pagado por transferencia ya está representado en
+    // la colección de transferencias, así que NO vuelve a sumar al total.
+    if (x.status === "transfer" || x.transferId) return s;
+    return s + Number(x.amount || 0);
+  }, 0);
   const transferRows = await transfers.find({
     accountNumber: account.number
   }).sort({ createdAt: 1 }).toArray();
@@ -2045,7 +2076,7 @@ async function handleMessage(msg) {
             return (i + 1) + ". 🔄 " + x.personName + " — " + money(x.amount) + " *TRANSFERENCIA*";
           }
 
-          if (x.status === "transfer") {
+          if (x.status === "transfer" || x.transferId) {
             return (i + 1) + ". 🔄 " + x.personName + " — " + money(x.amount) + " *PAGADO CON TRANSFERENCIA*";
           }
 
@@ -2330,10 +2361,12 @@ async function handleMessage(msg) {
 
     // MENSAJE 1: LISTA DE SERVICIOS
     const serviceBody = s.rows.length
-      ? s.rows.map((x, i) =>
-          (i + 1) + ". " + x.personName + " — " + money(x.amount) +
-          (x.status === "paid" ? " ✅" : " ⏳")
-        ).join("\n")
+      ? s.rows.map((x, i) => {
+          const status = (x.status === "transfer" || x.transferId)
+            ? " 🔄 *PAGADO CON TRANSFERENCIA*"
+            : (x.status === "paid" ? " ✅" : " ⏳");
+          return (i + 1) + ". " + x.personName + " — " + money(x.amount) + status;
+        }).join("\n")
       : "No hay servicios registrados.";
 
     await send(jid,
@@ -2418,7 +2451,7 @@ async function handleMessage(msg) {
 
     // MENSAJE 3: CORTE
     const byAmount = new Map();
-    for (const row of s.rows) {
+    for (const row of s.rows.filter(row => row.status !== "transfer" && !row.transferId)) {
       const amount = Number(row.amount || 0);
       byAmount.set(amount, (byAmount.get(amount) || 0) + 1);
     }
