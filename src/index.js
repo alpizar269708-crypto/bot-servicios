@@ -434,7 +434,7 @@ function commandOf(text) {
     return "deudores";
   }
 
-  if (fuzzyWord(joined, ["menu", "ayuda"], 2)) return "menu";
+  // Ajuste administrativo MUY específico: solo reconoce el nombre completo.\n  if (joined === "ajustetransferenciacaja") return "ajustetransferenciacaja";\n\n  if (fuzzyWord(joined, ["menu", "ayuda"], 2)) return "menu";
   if (fuzzyWord(joined, ["menuextra", "comandos", "ayudaextra", "ayudacomandos"], 2)) return "menuextra";
   if (fuzzyWord(joined, ["menusecreto"], 2)) return "menusecreto";
   if (words.length === 1 && isCancelText(first)) return "cancelar";
@@ -1373,7 +1373,7 @@ function menuSecreto() {
     "",
     "🔓 activarbotservicios — activa el bot en un grupo.",
     "🔒 desactivarbotservicios — desactiva el bot.",
-    "💵 pagados — muestra los servicios que ya fueron pagados."
+    "💵 pagados — muestra los servicios que ya fueron pagados."\n    "🧾 ajustetransferenciacaja Rosy 300 — ajuste manual específico para descontar una transferencia de caja."
   ].join("\n");
 }
 async function send(jid, text) {
@@ -2265,6 +2265,44 @@ async function handleMessage(msg) {
       "💵 " + money(a.amount) + "\n\n" +
       "🧮 Ajuste: -" + money(ajuste) + "\n" +
       "💰 Suma actual: *" + money(transferSummary.netTotal) + "*"
+    );
+    return;
+  }
+
+  if (command === "ajustetransferenciacaja") {
+    let args = text.trim();
+    if (args.startsWith(PREFIX)) args = args.slice(PREFIX.length).trim();
+
+    const rest = args.split(/\s+/).slice(1).join(" ").trim();
+    const a = amountFrom(rest);
+
+    if (!a || a.amount <= 0) {
+      await send(jid,
+        "❌ Formato exacto: *ajustetransferenciacaja Rosy 300*"
+      );
+      return;
+    }
+
+    const name = cleanName(rest, a.raw);
+    if (!name) {
+      await send(jid, "❌ Debes indicar el nombre. Ejemplo: *ajustetransferenciacaja Rosy 300*");
+      return;
+    }
+
+    // Reutiliza el mismo mecanismo de transferencia para que:
+    // 1) se registre el movimiento como salida,
+    // 2) se descuente del disponible,
+    // 3) se enlace al servicio de esa persona si existe.
+    await addService(name, a.amount, jid, true);
+
+    const updated = await servicesSummary();
+
+    await send(jid,
+      "🧾 *AJUSTE DE TRANSFERENCIA*\n" +
+      "👤 " + name + "\n" +
+      "💵 " + money(a.amount) + "\n\n" +
+      "➖ Descontado de caja: *" + money(a.amount) + "*\n" +
+      "💰 Disponible actual: *" + money(updated.netTotal) + "*"
     );
     return;
   }
