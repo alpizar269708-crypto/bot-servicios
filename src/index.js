@@ -933,9 +933,6 @@ async function reconcileTransfers() {
   }
 }
 
-
-// VALIDACIÓN: el total que se muestra al registrar un servicio debe ser
-// exactamente el efectivo disponible: inicio + servicios - transferencias - retiros.
 async function servicesSummary() {
   await reconcileTransfers();
   const account = await ensureAccount();
@@ -953,33 +950,20 @@ async function servicesSummary() {
     (s, x) => s + Number(x.amount || 0),
     0
   );
-
   const transferRows = await transfers.find({
     accountNumber: account.number
   }).sort({ createdAt: 1 }).toArray();
-  const transferTotal = transferRows.reduce(
-    (s, x) => s + Number(x.amount || 0),
-    0
-  );
+  const transferTotal = transferRows.reduce((s, x) => s + Number(x.amount || 0), 0);
 
   const withdrawalRows = await c.withdrawals.find({
     accountNumber: account.number
   }).sort({ createdAt: 1 }).toArray();
-  const withdrawnTotal = withdrawalRows.reduce(
-    (s, x) => s + Number(x.amount || 0),
-    0
-  );
+  const withdrawnTotal = withdrawalRows.reduce((s, x) => s + Number(x.amount || 0), 0);
 
-  // CAJA DISPONIBLE:
-  // - Parte del efectivo inicial de la cuenta.
-  // - Suma TODOS los servicios registrados, sin importar si están
-  //   pendientes o pagados, porque forman parte del control de la cuenta.
-  // - Resta únicamente el dinero que salió de caja:
-  //   transferencias y retiros.
-  // Nunca se resta por "pagado" ni por "pendiente".
+  // CAJA DISPONIBLE = inicio + servicios - transferencias - retiros.
+  // Los servicios cuentan para el control aunque estén pendientes o pagados.
   const total = Number(account.initialAmount || 0) + serviceTotal;
-  const cashAvailable = Math.max(0, total - transferTotal - withdrawnTotal);
-  const netTotal = cashAvailable;
+  const netTotal = total - transferTotal - withdrawnTotal;
 
   const pending = rows.filter(x => x.status === "pending");
   const paid = rows.filter(x => x.status === "paid");
@@ -2414,3 +2398,572 @@ async function handleMessage(msg) {
       );
       return;
     }
+
+    const pending = await pendingServicesForPerson(matchedPerson.name);
+    if (!pending.ok) {
+      await send(jid, "❌ No encuentro a *" + name + "*.");
+      return;
+    }
+
+    let rows = pending.rows;
+
+    if (requestedIndex !== null) {
+      if (requestedIndex < 1 || requestedIndex > rows.length) {
+        await send(jid, "❌ El número " + requestedIndex + " no existe para *" + pending.person.name + "*.");
+        return;
+      }
+      rows = [rows[requestedIndex - 1]];
+    }
+
+    if (requestedAmount && requestedIndex === null) {
+      rows = rows.filter(x => Number(x.amount) === Number(requestedAmount.amount));
+    }
+
+    if (requestedDate && requestedIndex === null) {
+      rows = rows.filter(x => sameLocalDate(x.createdAt, requestedDate));
+    }
+
+    if (!rows.length) {
+      await send(jid, "ℹ️ *" + pending.person.name + "* no tiene esa deuda pendiente.");
+      return;
+    }
+
+    if (rows.length === 1) {
+      const result = await payServices(pending.person.name, [rows[0]._id]);
+      if (!result.ok) {
+        await send(jid, "ℹ️ Esa deuda ya no está pendiente.");
+        return;
+      }
+
+      await send(jid,
+        "✅ *PAGO REGISTRADO*\n" +
+        "👤 " + result.person.name + "\n" +
+        "💵 " + money(result.total) +
+        (result.count > 1 ? "\n🧾 " + result.count + " servicios" : "")
+      );
+      return;
+    }
+
+    await savePendingAction(jid, {
+      type: "pay_select",
+      personName: pending.person.name,
+      serviceIds: rows.map(x => x._id),
+      rows
+    });
+
+    await send(jid,
+      "💵 *¿QUÉ DEUDA QUIERES PAGAR?*\n\n" +
+      "👤 " + pending.person.name + "\n" +
+      formatDebtChoices(pending.person, rows) +
+      "\n\nPuedes responder al mensaje o simplemente escribe el *número* (1, 2, 3...) durante los próximos 5 minutos."
+    );
+    return;
+  }
+
+  if (command === "transferencia") {
+    let args = text.trim();
+    if (args.startsWith(PREFIX)) args = args.slice(PREFIX.length).trim();
+
+    // Acepta "transferencia Rosy 300", "Rosy 300 transferencia"
+    // y responder a un servicio escribiendo solo "transferencia".
+    args = args.split(/\s+/)
+      .filter(word => !isTransferWord(word))
+      .join(" ")
+      .trim();
+
+    if (!args && quoted) args = quoted.replace(/^!/, "").trim();
+
+    const a = amountFrom(args);
+    if (!a) {
+      await send(jid, "❌ Escribe: transferencia Fulano 250 o responde al mensaje de Fulano 250 y escribe transferencia.");
+      return;
+    }
+
+    const name = cleanName(args, a.raw);
+    if (!name) {
+      await send(jid, "❌ No pude identificar el nombre.");
+      return;
+    }
+
+    await addService(name, a.amount, jid, true);
+    const transferSummary = await servicesSummary();
+    const ajuste = Number(a.amount || 0);
+    await send(jid,
+      "🔄 *TRANSFERENCIA*\n" +
+      "👤 " + name + "\n" +
+      "💵 " + money(a.amount) + "\n\n" +
+      "🧮 Ajuste: -" + money(ajuste) + "\n" +
+      "💰 Suma actual: *" + money(transferSummary.netTotal) + "*"
+    );
+    return;
+  }
+
+  if (command === "ajustetransferenciacaja") {
+    let args = text.trim();
+    if (args.startsWith(PREFIX)) args = args.slice(PREFIX.length).trim();
+
+    const rest = args.split(/\s+/).slice(1).join(" ").trim();
+    const a = amountFrom(rest);
+
+    if (!a || a.amount <= 0) {
+      await send(jid,
+        "❌ Formato exacto: *ajustetransferenciacaja Rosy 300*"
+      );
+      return;
+    }
+
+    const name = cleanName(rest, a.raw);
+    if (!name) {
+      await send(jid, "❌ Debes indicar el nombre. Ejemplo: *ajustetransferenciacaja Rosy 300*");
+      return;
+    }
+
+    // Reutiliza el mismo mecanismo de transferencia para que:
+    // 1) se registre el movimiento como salida,
+    // 2) se descuente del disponible,
+    // 3) se enlace al servicio de esa persona si existe.
+    await addService(name, a.amount, jid, true);
+
+    const updated = await servicesSummary();
+
+    await send(jid,
+      "🧾 *AJUSTE DE TRANSFERENCIA*\n" +
+      "👤 " + name + "\n" +
+      "💵 " + money(a.amount) + "\n\n" +
+      "➖ Descontado de caja: *" + money(a.amount) + "*\n" +
+      "💰 Disponible actual: *" + money(updated.netTotal) + "*"
+    );
+    return;
+  }
+
+  if (command === "retiro") {
+    let args = text.trim();
+    if (args.startsWith(PREFIX)) args = args.slice(PREFIX.length).trim();
+    const rest = args.split(/\s+/).slice(1).join(" ").trim();
+    const a = amountFrom(rest);
+
+    if (!a) {
+      await send(jid, "❌ Escribe: retiro 5000");
+      return;
+    }
+
+    const s = await servicesSummary();
+    const c = await collections();
+
+    if (a.amount > s.netTotal) {
+      await send(jid, "❌ El retiro supera el total disponible de " + money(s.netTotal) + ".");
+      return;
+    }
+
+    const now = new Date();
+    await c.withdrawals.insertOne({
+      accountNumber: s.account.number,
+      amount: a.amount,
+      createdAt: now,
+      jid
+    });
+
+    const updated = await servicesSummary();
+    await send(jid,
+      "💸 *RETIRO*\n" +
+      "💵 " + money(a.amount) + "\n" +
+      "📅 " + now.toLocaleString("es-MX", { timeZone: "America/Mexico_City" }) + "\n" +
+      "💰 Queda: " + money(updated.netTotal)
+    );
+    return;
+  }
+
+  if (command === "cuenta_nueva") {
+    let args = text.trim();
+    if (args.startsWith(PREFIX)) args = args.slice(PREFIX.length).trim();
+
+    // "cuenta nueva" acepta el monto de inicio aunque venga:
+    // - con comas: 1,000 / 10,000
+    // - sin comas: 1000 / 10000
+    // - con espacios: 1 000 / 10 000
+    // - en renglones separados: 1\n000
+    // - con signo de pesos: $1,000
+    // También acepta variantes como "cuenta nueva: 1,000".
+    const rest = args
+      .replace(/^cuenta\s+nueva\b/i, "")
+      .replace(/^cuentanueva\b/i, "")
+      .trim();
+
+    const digits = rest.replace(/[^0-9]/g, "");
+    const initialAmount = digits ? Number(digits) : 0;
+    const account = await newAccount(initialAmount);
+
+    const { accounts } = await collections();
+    const previous = await accounts.findOne(
+      { number: account.number - 1 },
+      { sort: { closedAt: -1 } }
+    );
+    const ps = previous?.finalSummary;
+
+    await send(jid,
+      "🆕 *CUENTA*\n" +
+      "💵 Inicio: *" + money(account.initialAmount) + "*\n" +
+      (ps
+        ? "\n📌 *CUENTA ANTERIOR*\n" +
+          "🧾 Servicios: " + ps.count + "\n" +
+          "💰 Suma: " + money(ps.total) + "\n" +
+          "🔄 Transferencias: " + money(ps.transfers || 0) + "\n" +
+          "💸 Retiros: " + money(ps.withdrawals) + "\n" +
+          "📊 Final: " + money(ps.netTotal) + "\n" +
+          "⏳ Pendiente: " + money(ps.pending) + "\n" +
+          "✅ Pagado: " + money(ps.paid)
+        : "\n📌 Sin cuenta anterior.")
+    );
+    return;
+  }
+
+  if (command === "corte") {
+    // El corte envía exactamente 3 mensajes y en este orden:
+    // 1) lista de servicios
+    // 2) lista de deudores
+    // 3) resumen del corte
+    const s = await servicesSummary();
+    const { accounts, cycles, services } = await collections();
+    const closedAt = new Date();
+
+    // MENSAJE 1: LISTA DE SERVICIOS
+    const serviceBody = s.rows.length
+      ? s.rows.map((x, i) => {
+          const status = (x.status === "transfer" || x.transferId)
+            ? " 🔄 *TRANSFERENCIA*"
+            : (x.status === "paid" ? " ✅" : " ⏳");
+          return (i + 1) + ". " + x.personName + " — " + money(x.amount) + status;
+        }).join("\n")
+      : "No hay servicios registrados.";
+
+    await send(jid,
+      "📋 *CUENTA " + Number(s.account.initialAmount || 0).toLocaleString("es-MX") + "*\n\n" +
+      serviceBody
+    );
+
+    // MENSAJE 2: LISTA DE DEUDORES
+    const debtorRows = await services.find({
+      status: "pending",
+      personName: { $not: /^retiro$/i }
+    }).sort({ createdAt: 1 }).toArray();
+
+    if (!debtorRows.length) {
+      await send(jid, "👥 *DEUDORES*\n\n✅ No hay deudores pendientes.");
+    } else {
+      const grouped = new Map();
+
+      for (const x of debtorRows) {
+        const key = String(x.personId);
+        if (!grouped.has(key)) {
+          grouped.set(key, {
+            name: x.personName,
+            total: 0,
+            rows: []
+          });
+        }
+
+        const g = grouped.get(key);
+        g.total += Number(x.amount || 0);
+        g.rows.push(x);
+      }
+
+      let debtorTotal = 0;
+      const debtorBody = [...grouped.values()].map((g, i) => {
+        debtorTotal += g.total;
+
+        const details = g.rows.map(x =>
+          "   💵 " + money(x.amount) + "   📅 " +
+          new Date(x.createdAt).toLocaleDateString("es-MX", {
+            timeZone: "America/Mexico_City",
+            dateStyle: "short"
+          })
+        ).join("\n");
+
+        return (i + 1) + ". 👤 *" + g.name + "* — " + money(g.total) +
+          "\n" + details;
+      }).join("\n\n");
+
+      await send(jid,
+        "👥 *DEUDORES*\n\n" +
+        debtorBody +
+        "\n\n💰 Total pendiente: *" + money(debtorTotal) + "*"
+      );
+    }
+
+    // Cerramos la cuenta después de enviar las dos listas,
+    // para que ambas correspondan al ciclo que se está cerrando.
+    await accounts.updateOne(
+      { _id: s.account._id },
+      { $set: { active: false, closedAt } }
+    );
+
+    await cycles.updateOne(
+      { accountNumber: s.account.number },
+      {
+        $set: {
+          status: "closed",
+          closedAt,
+          summary: {
+            count: s.rows.length,
+            total: s.total,
+            withdrawals: s.withdrawnTotal,
+            transfers: s.transferTotal,
+            netTotal: s.netTotal,
+            pending: s.pendingTotal,
+            paid: s.paidTotal
+          }
+        }
+      }
+    );
+
+    // MENSAJE 3: CORTE
+    const byAmount = new Map();
+    for (const row of s.rows.filter(row => row.status !== "transfer" && !row.transferId)) {
+      const amount = Number(row.amount || 0);
+      byAmount.set(amount, (byAmount.get(amount) || 0) + 1);
+    }
+
+    const serviceLines = [...byAmount.entries()]
+      .sort((a, b) => b[0] - a[0])
+      .map(([amount, count]) =>
+        money(amount) + "*" + count + "=" + money(amount * count)
+      )
+      .join("\n");
+
+    const serviceSection = serviceLines || "Sin servicios normales.";
+
+    await send(jid,
+      "✂️ *CORTE*\n\n" +
+      "📋 *Servicios:*\n" +
+      serviceSection + "\n\n" +
+      "💰 Suma total: *" + money(s.total) + "*\n" +
+      "🔄 Transferencias: *" + money(s.transferTotal) + "*\n" +
+      "💸 Retiros: *" + money(s.withdrawnTotal) + "*\n" +
+      "⏳ Pendiente: *" + money(s.pendingTotal) + "*\n" +
+      "✅ Pagado: *" + money(s.paidTotal) + "*\n\n" +
+      "📊 Final: *" + money(s.netTotal) + "*"
+    );
+    return;
+  }
+
+  const raw = text.replace(/^!/, "").trim();
+  const a = amountFrom(raw);
+
+  // Nunca registrar como servicio una palabra que parezca un comando.
+  // Esto evita que faltas como "retior 1" terminen creando un deudor llamado "retior".
+  if (a) {
+    const firstWord = norm(raw.split(/\s+/)[0] || "");
+    const looksLikeCommand =
+      fuzzyWord(firstWord, ["retiro", "retirar", "ret", "r"], 1) ||
+      fuzzyWord(firstWord, ["transferencia", "transfer", "transf", "trans"], 2) ||
+      fuzzyWord(firstWord, ["p", "pa", "pag", "pago", "pagado", "pagar", "paf"], 1);
+
+    if (looksLikeCommand) return;
+    const name = cleanName(raw, a.raw);
+    if (name.length >= 2) {
+      const transfer = /\b(transferencia|transfer|transf)\b/i.test(raw);
+      const type = await addService(name, a.amount, jid, transfer);
+
+      if (type === "transfer") {
+        const transferSummary = await servicesSummary();
+        await send(jid,
+          "🔄 *TRANSFERENCIA*\n" +
+          "👤 " + name + "\n" +
+          "💵 " + money(a.amount) + "\n\n" +
+          "💰 Suma actual: *" + money(transferSummary.netTotal) + "*"
+        );
+      } else {
+        const summary = await servicesSummary();
+        const serviceCount = summary.rows.length;
+
+        await send(jid,
+          "🧾 *SERVICIO " + serviceCount + "*\n" +
+          "👤 " + name + "\n" +
+          "💵 " + money(a.amount) + "\n\n" +
+          "💰 Total: *" + money(summary.netTotal) + "*");
+      }
+    }
+  }
+}
+
+async function resetWhatsAppAuth() {
+  // La sesión REAL de Baileys se guarda en la colección auth_sessions
+  // mediante src/mongoAuth.js. La colección bot_servicios_auth es antigua
+  // y no debe usarse para borrar la sesión de WhatsApp.
+  await mongoose.connection.db.collection("auth_sessions").deleteMany({});
+  authState = null;
+  currentQR = null;
+  currentPairingCode = null;
+  requestedPairingPhone = null;
+  pairingInProgress = false;
+  botConnected = false;
+  console.log("🧹 Sesión de WhatsApp inválida eliminada.");
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer || botConnected || starting) return;
+
+  reconnectTimer = setTimeout(async () => {
+    reconnectTimer = null;
+    try {
+      await start(loginMode || "qr", loginPhone || "");
+    } catch (error) {
+      console.error("❌ Error en la reconexión:", error?.message || error);
+      scheduleReconnect();
+    }
+  }, 3000);
+}
+
+async function start(mode = "qr", phone = "", onCodeReady = null) {
+  if (starting || sock) return;
+  starting = true;
+  loginMode = mode;
+  loginPhone = phone;
+
+  try {
+    if (!authState) authState = await useMongoDBAuthState("sesion");
+    const { state, saveCreds } = authState;
+    const latest = await fetchLatestWaWebVersion();
+
+    sock = makeWASocket({
+      version: latest.version,
+      logger,
+      auth: state,
+      browser: Browsers.macOS("Chrome"),
+      syncFullHistory: false,
+      // Este bot no necesita descargar historial de chats. Bloqueamos la
+      // sincronización automática de historial para evitar que WhatsApp
+      // muestre el aviso de "Sincronizando con WhatsApp..." en el teléfono.
+      shouldSyncHistoryMessage: () => false,
+      generateHighQualityLinkPreview: false,
+      markOnlineOnConnect: false,
+      printQRInTerminal: false,
+      getMessage: async () => ({ conversation: "" })
+    });
+
+    sock.ev.on("creds.update", saveCreds);
+
+    if (mode === "phone" && !state.creds.me && phone) {
+      setTimeout(async () => {
+        try {
+          requestedPairingPhone = phone;
+          const code = await generatePairingCode();
+          if (code) {
+            console.log("🔢 Código de vinculación generado.");
+            if (onCodeReady) {
+              const codigoFormat = code?.match(/.{1,4}/g)?.join("-") || code;
+              onCodeReady(`
+                <div style="font-family: Arial; text-align: center; margin-top: 50px;">
+                  <h2>🔢 Tu código de vinculación es:</h2>
+                  <h1 style="font-size: 48px; letter-spacing: 5px; color: #25D366; background: #eee; display: inline-block; padding: 10px 20px; border-radius: 10px;">${codigoFormat}</h1>
+                  <p>Abre WhatsApp en tu teléfono, ve a <b>Dispositivos Vinculados &gt; Vincular con número de teléfono</b>, e ingresa este código.</p>
+                </div>
+              `);
+              onCodeReady = null;
+            }
+          }
+        } catch (e) {
+          console.error("❌ Error al generar código de vinculación:", e?.message || e);
+        }
+      }, 3000);
+    }
+
+    sock.ev.on("connection.update", async update => {
+      const connection = update.connection;
+
+      if (update.qr && loginMode === "qr") {
+        currentQR = update.qr;
+        currentPairingCode = null;
+        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(update.qr)}`;
+        if (onCodeReady) {
+          onCodeReady(`
+            <div style="font-family: Arial; text-align: center; margin-top: 50px;">
+              <h2>📱 Escanea este código QR</h2>
+              <img src="${qrUrl}" alt="QR Code" style="border: 1px solid #ccc; border-radius: 10px; padding: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" />
+              <p>Abre WhatsApp &gt; Dispositivos Vinculados &gt; Vincular un dispositivo.</p>
+            </div>
+          `);
+          onCodeReady = null;
+        }
+        console.log("📱 QR generado — disponible únicamente en la página.");
+      }
+
+      if (connection === "open") {
+        starting = false;
+        botConnected = true;
+        currentQR = null;
+        currentPairingCode = null;
+        requestedPairingPhone = null;
+        pairingInProgress = false;
+        console.log("✅ WhatsApp conectado.");
+
+        if (onCodeReady) {
+          onCodeReady(`
+            <div style="font-family: Arial; text-align: center; margin-top: 50px;">
+              <h2 style="color: #25D366;">✅ ¡Bot vinculado correctamente!</h2>
+              <p>El bot ya está en línea y listo para trabajar.</p>
+            </div>
+          `);
+          onCodeReady = null;
+        }
+
+      }
+
+      if (connection === "close") {
+        starting = false;
+        botConnected = false;
+        sock = null;
+
+        const code = update.lastDisconnect?.error?.output?.statusCode;
+        console.log(`⚠️ WhatsApp desconectado (código ${code ?? "desconocido"}). Se reintentará.`);
+
+        if (code === DisconnectReason.loggedOut) {
+          currentQR = null;
+          currentPairingCode = null;
+          requestedPairingPhone = null;
+          console.log("🔴 WhatsApp reportó SESIÓN CERRADA (loggedOut). Eliminando únicamente la sesión de WhatsApp para permitir una nueva vinculación.");
+          try {
+            await resetWhatsAppAuth();
+          } catch (e) {
+            console.error("❌ No se pudo limpiar la sesión de WhatsApp:", e?.message || e);
+          }
+          return;
+        }
+
+        scheduleReconnect();
+      }
+    });
+
+    sock.ev.on("messages.upsert", async event => {
+      for (const msg of event.messages) {
+        try {
+          await handleMessage(msg);
+        } catch (error) {
+          console.error("❌ Error procesando mensaje:", error?.message || error);
+        }
+      }
+    });
+  } catch (error) {
+    starting = false;
+    sock = null;
+    console.error("❌ Error iniciando WhatsApp:", error?.message || error);
+    scheduleReconnect();
+  }
+}
+
+(async () => {
+  await mongo.connect();
+  db = mongo.db(DB_NAME);
+  await mongoose.connect(MONGO_URI);
+  authState = await useMongoDBAuthState("sesion");
+  await ensureIndexes();
+  await ensureAccount();
+  logger.info("MongoDB conectado.");
+
+  if (authState.state.creds.me) {
+    console.log("✅ Sesión previa detectada. Arrancando bot automáticamente...");
+    await start("qr", "");
+  } else {
+    console.log("⚠️ No hay sesión de WhatsApp. Entra al panel web para vincular el bot.");
+  }
+})();
