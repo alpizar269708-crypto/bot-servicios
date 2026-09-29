@@ -1373,7 +1373,8 @@ function menuSecreto() {
     "",
     "🔓 activarbotservicios — activa el bot en un grupo.",
     "🔒 desactivarbotservicios — desactiva el bot.",
-    "💵 pagados — muestra los servicios que ya fueron pagados."\n    "🧾 ajustetransferenciacaja Rosy 300 — ajuste manual específico para descontar una transferencia de caja."
+    "💵 pagados — muestra los servicios que ya fueron pagados.",
+    "🧾 ajustetransferenciacaja Rosy 300 — ajuste manual específico para descontar una transferencia de caja."
   ].join("\n");
 }
 async function send(jid, text) {
