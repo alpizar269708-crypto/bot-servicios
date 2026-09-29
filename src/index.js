@@ -697,8 +697,7 @@ async function ensureIndexes() {
   const c = await collections();
   await c.accounts.createIndex({ number: 1 }, { unique: true });
   await c.accounts.createIndex({ active: 1 });
-  await c.people.createIndex({ normalizedName: 1 }, { unique: true });  await c.services.createIndex({ accountNumber: 1, status: 1 });
-  await c.services.createIndex({ personId: 1, status: 1 });
+  await c.people.createIndex({ normalizedName: 1 }, { unique: true });  await c.services.createIndex({ accountNumber: 1, status: 1 });  await c.services.createIndex({ personId: 1, status: 1 });
   await c.payments.createIndex({ accountNumber: 1 });
   await c.cycles.createIndex({ accountNumber: 1 }, { unique: true });
 }
@@ -927,6 +926,74 @@ async function reconcileTransfers() {
       { $set: { serviceId: service._id } }
     );
   }
+}
+
+async function repairKnownRosyTransferIssue() {
+  const account = await ensureAccount();
+  const c = await collections();
+
+  // Reparación puntual de los registros creados por el intento fallido de
+  // "ajustetransferenciacaja Rosy 300". Solo afecta a este registro conocido.
+  const rosy = await c.people.findOne({ normalizedName: "rosy" });
+  const badPerson = await c.people.findOne({
+    normalizedName: "ajustetransferenciacaja rosy"
+  });
+
+  if (badPerson) {
+    await c.services.deleteMany({
+      accountNumber: account.number,
+      personId: badPerson._id,
+      amount: 300
+    });
+
+    const remaining = await c.services.countDocuments({
+      personId: badPerson._id
+    });
+
+    if (!remaining) {
+      await c.people.deleteOne({ _id: badPerson._id });
+    }
+  }
+
+  if (!rosy) return;
+
+  // La transferencia real de Rosy debe quedar enlazada a su servicio de $300.
+  const transfer = await c.transfers.findOne({
+    accountNumber: account.number,
+    personId: rosy._id,
+    amount: 300
+  }, {
+    sort: { createdAt: -1 }
+  });
+
+  if (!transfer) return;
+
+  const service = await c.services.findOne({
+    accountNumber: account.number,
+    personId: rosy._id,
+    amount: 300,
+    transferId: { $exists: false },
+    status: { $in: ["pending", "paid"] }
+  }, {
+    sort: { createdAt: 1 }
+  });
+
+  if (!service) return;
+
+  await c.services.updateOne(
+    { _id: service._id },
+    {
+      $set: {
+        status: "transfer",
+        transferId: transfer._id
+      }
+    }
+  );
+
+  await c.transfers.updateOne(
+    { _id: transfer._id },
+    { $set: { serviceId: service._id } }
+  );
 }
 
 async function servicesSummary() {
@@ -1397,8 +1464,7 @@ async function send(jid, text) {
     setTimeout(() => botSentMessageIds.delete(result.key.id), 10 * 60 * 1000);
   }
 
-  return result;
-}
+  return result;}
 async function handleMessage(msg) {
   // No procesar mensajes enviados por el propio bot.
   // Los mensajes escritos manualmente por el usuario desde ese mismo
@@ -2097,8 +2163,7 @@ async function handleMessage(msg) {
       : "No hay servicios registrados.";
 
     await send(jid,
-      "📋 *CUENTA*\n\n" +
-      body
+      "📋 *CUENTA*\n\n" +      body
     );
     return;
   }
