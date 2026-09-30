@@ -654,6 +654,21 @@ async function findTelRecords(query) {
   }).sort({ createdAt: 1 }).toArray();
 }
 
+async function allTelRecords() {
+  const { telRecords } = await collections();
+  return telRecords.find({}).sort({ createdAt: 1, _id: 1 }).toArray();
+}
+
+async function deleteTelRecord(id) {
+  const { telRecords } = await collections();
+  const row = await telRecords.findOne({ _id: id });
+
+  if (!row) return { ok: false, reason: "not_found" };
+
+  await telRecords.deleteOne({ _id: row._id });
+  return { ok: true, doc: row };
+}
+
 async function finishPortability(query, jid) {
   const rows = await findPortability(query);
   if (!rows.length) return { ok: false, count: 0, reason: "not_found" };
@@ -1962,6 +1977,30 @@ async function handleMessage(msg) {
       return;
     }
 
+    if (pendingAction.type === "tel_delete_select") {
+      if (selectedNumber && pendingAction.recordIds[selectedNumber - 1]) {
+        const selectedId = pendingAction.recordIds[selectedNumber - 1];
+        const result = await deleteTelRecord(selectedId);
+        await clearPendingAction(jid);
+
+        if (!result.ok) {
+          await send(jid, "ℹ️ Ese registro ya no existe.");
+          return;
+        }
+
+        await send(jid,
+          "✅ *TELÉFONO ELIMINADO*\n" +
+          "👤 " + result.doc.name + "\n" +
+          "📱 " + result.doc.phone +
+          (result.doc.emailSuffix ? "  ✉️ .." + result.doc.emailSuffix : "")
+        );
+        return;
+      }
+
+      await send(jid, "❌ Escribe el número del registro que quieres eliminar.");
+      return;
+    }
+
     if (pendingAction.type === "pay_select") {
       let selected = null;
       if (selectedNumber && pendingAction.serviceIds[selectedNumber - 1]) {
@@ -2091,7 +2130,9 @@ async function handleMessage(msg) {
         "2. Vertel nombre\\n" +
         "3. Portabilidad nombre IMEI(15) temporal(10) conservar(10) 2dígitos(opcional)\\n" +
         "4. Portafin nombre\\n" +
-        "5. Guardartelmasivo + lista"
+        "5. Guardartelmasivo + lista\n" +
+        "6. Vertodos\n" +
+        "7. Eliminartel número | nombre | teléfono"
       );
       return;
     }
@@ -2131,6 +2172,24 @@ async function handleMessage(msg) {
       return;
     }
 
+    if (directCommand === "vertodos") {
+      const rows = await allTelRecords();
+
+      if (!rows.length) {
+        await send(jid, "ℹ️ No hay teléfonos guardados.");
+        return;
+      }
+
+      const body = rows.map((x, i) =>
+        (i + 1) + ". 👤 *" + x.name + "*\n" +
+        "📱 " + x.phone +
+        (x.emailSuffix ? "  ✉️ .." + x.emailSuffix : "")
+      ).join("\n\n");
+
+      await send(jid, "📱 *TODOS LOS TELÉFONOS*\n\n" + body);
+      return;
+    }
+
     if (directCommand === "portabilidad") {
       const result = await savePortability(directParts.slice(1).join(" "), jid);
       if (!result.ok) {
@@ -2165,6 +2224,123 @@ async function handleMessage(msg) {
         (x.emailSuffix ? "  ✉️ .." + x.emailSuffix : "")
       ).join("\n\n");
       await send(jid, "✅ *PORTABILIDAD FINALIZADA*\n\n" + body);
+      return;
+    }
+
+    if (directCommand === "eliminartel") {
+      const query = directParts.slice(1).join(" ").trim();
+
+      if (!query) {
+        await send(jid, "❌ Usa: Eliminartel número | nombre | teléfono");
+        return;
+      }
+
+      // Número corto: posición del registro en Vertodos.
+      if /^\d{1,6}$/.test(query)) {
+        const index = Number(query);
+        const rows = await allTelRecords();
+
+        if (!rows[index - 1]) {
+          await send(jid, "❌ Ese número no existe en la lista.");
+          return;
+        }
+
+        const result = await deleteTelRecord(rows[index - 1]._id);
+
+        if (!result.ok) {
+          await send(jid, "ℹ️ Ese registro ya no existe.");
+          return;
+        }
+
+        await send(jid,
+          "✅ *TELÉFONO ELIMINADO*\n" +
+          "👤 " + result.doc.name + "\n" +
+          "📱 " + result.doc.phone +
+          (result.doc.emailSuffix ? "  ✉️ .." + result.doc.emailSuffix : "")
+        );
+        return;
+      }
+
+      // Teléfono exacto de 10 dígitos.
+      if /^\d{10}$/.test(query) {
+        const rows = await findTelRecords(query);
+
+        if (!rows.length) {
+          await send(jid, "ℹ️ No encontré ese teléfono.");
+          return;
+        }
+
+        if (rows.length > 1) {
+          await savePendingAction(jid, {
+            type: "tel_delete_select",
+            recordIds: rows.map(x => x._id)
+          });
+
+          await send(jid,
+            "🗑️ *¿CUÁL QUIERES ELIMINAR?*\n\n" +
+            rows.map((x, i) =>
+              (i + 1) + ". 👤 *" + x.name + "*\n📱 " + x.phone +
+              (x.emailSuffix ? "  ✉️ .." + x.emailSuffix : "")
+            ).join("\n\n") +
+            "\n\nEscribe el número durante 5 minutos."
+          );
+          return;
+        }
+
+        const result = await deleteTelRecord(rows[0]._id);
+
+        if (!result.ok) {
+          await send(jid, "ℹ️ Ese registro ya no existe.");
+          return;
+        }
+
+        await send(jid,
+          "✅ *TELÉFONO ELIMINADO*\n" +
+          "👤 " + result.doc.name + "\n" +
+          "📱 " + result.doc.phone +
+          (result.doc.emailSuffix ? "  ✉️ .." + result.doc.emailSuffix : "")
+        );
+        return;
+      }
+
+      // Nombre exacto o por prefijo, igual que Vertel.
+      const rows = await findTelRecords(query);
+
+      if (!rows.length) {
+        await send(jid, "ℹ️ No encontré registros para *" + query + "*.");
+        return;
+      }
+
+      if (rows.length > 1) {
+        await savePendingAction(jid, {
+          type: "tel_delete_select",
+          recordIds: rows.map(x => x._id)
+        });
+
+        await send(jid,
+          "🗑️ *¿CUÁL QUIERES ELIMINAR?*\n\n" +
+          rows.map((x, i) =>
+            (i + 1) + ". 👤 *" + x.name + "*\n📱 " + x.phone +
+            (x.emailSuffix ? "  ✉️ .." + x.emailSuffix : "")
+          ).join("\n\n") +
+          "\n\nEscribe el número durante 5 minutos."
+        );
+        return;
+      }
+
+      const result = await deleteTelRecord(rows[0]._id);
+
+      if (!result.ok) {
+        await send(jid, "ℹ️ Ese registro ya no existe.");
+        return;
+      }
+
+      await send(jid,
+        "✅ *TELÉFONO ELIMINADO*\n" +
+        "👤 " + result.doc.name + "\n" +
+        "📱 " + result.doc.phone +
+        (result.doc.emailSuffix ? "  ✉️ .." + result.doc.emailSuffix : "")
+      );
       return;
     }
 
