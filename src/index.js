@@ -654,6 +654,81 @@ async function findTelRecords(query) {
   }).sort({ createdAt: 1 }).toArray();
 }
 
+async function finishPortability(query, jid) {
+  const rows = await findPortability(query);
+  if (!rows.length) return { ok: false, count: 0, reason: "not_found" };
+
+  const c = await collections();
+  const saved = [];
+
+  for (const x of rows) {
+    const doc = {
+      name: x.name,
+      normalizedName: normalizeStoredName(x.name),
+      phone: x.keep,
+      emailSuffix: x.emailSuffix || "",
+      createdAt: new Date(),
+      createdBy: jid,
+      source: "portafin"
+    };
+    await c.telRecords.insertOne(doc);
+    saved.push(doc);
+  }
+
+  await c.portability.deleteMany({ _id: { $in: rows.map(x => x._id) } });
+  return { ok: true, count: saved.length, records: saved };
+}
+
+async function saveTelRecordsMassive(raw, jid) {
+  const lines = String(raw || "")
+    .replace(/\r/g, "")
+    .split("\n")
+    .map(x => x.trim())
+    .filter(Boolean);
+
+  const records = [];
+  const invalid = [];
+
+  for (const line of lines) {
+    const parts = line.split(/\s+/).filter(Boolean);
+    const phoneIndex = parts.findIndex(x => /^\d{10}$/.test(String(x).replace(/\D/g, "")));
+    if (phoneIndex < 1) {
+      invalid.push(line);
+      continue;
+    }
+
+    const phone = String(parts[phoneIndex]).replace(/\D/g, "");
+    let before = parts.slice(0, phoneIndex);
+    let emailSuffix = "";
+
+    if (before.length && /^\d{2}$/.test(before[before.length - 1])) {
+      emailSuffix = before.pop();
+    }
+
+    const name = before.join(" ").trim();
+    if (!name) {
+      invalid.push(line);
+      continue;
+    }
+
+    records.push({
+      name,
+      normalizedName: normalizeStoredName(name),
+      phone,
+      emailSuffix,
+      createdAt: new Date(),
+      createdBy: jid,
+      source: "guardartelmasivo"
+    });
+  }
+
+  if (!records.length) return { ok: false, saved: 0, invalid: lines.length };
+
+  const c = await collections();
+  const result = await c.telRecords.insertMany(records);
+  return { ok: true, saved: result.insertedCount, invalid: invalid.length };
+}
+
 async function savePortability(args, jid) {
   const parsed = splitPortabilityArgs(args);
   if (!parsed) return { ok: false };
@@ -2077,18 +2152,33 @@ async function handleMessage(msg) {
         await send(jid, "❌ Usa: Portafin nombre");
         return;
       }
-      const rows = await findPortability(query);
-      if (!rows.length) {
+      const result = await finishPortability(query, jid);
+      if (!result.ok) {
         await send(jid, "ℹ️ No encontré una portabilidad para *" + query + "*.");
         return;
       }
-      const body = rows.map((x, i) =>
-        (rows.length > 1 ? (i + 1) + ". " : "") +
-        "👤 *" + x.name + "*\\n" +
-        "📱 " + x.keep +
+      const body = result.records.map((x, i) =>
+        (result.records.length > 1 ? (i + 1) + ". " : "") +
+        "👤 *" + x.name + "*\n" +
+        "📱 " + x.phone +
         (x.emailSuffix ? "  ✉️ .." + x.emailSuffix : "")
-      ).join("\\n\\n");
-      await send(jid, "📲 *PORTABILIDAD FINAL*\\n\\n" + body);
+      ).join("\n\n");
+      await send(jid, "✅ *PORTABILIDAD FINALIZADA*\n\n" + body);
+      return;
+    }
+
+    if (directCommand === "guardartelmasivo") {
+      const rawMassive = rawDirect.slice(rawDirect.toLowerCase().indexOf("guardartelmasivo") + "guardartelmasivo".length).trim();
+      const result = await saveTelRecordsMassive(rawMassive, jid);
+      if (!result.ok) {
+        await send(jid, "❌ No encontré registros válidos.");
+        return;
+      }
+      await send(jid,
+        "✅ *TELÉFONOS GUARDADOS*\n" +
+        "📱 " + result.saved +
+        (result.invalid ? "\n⚠️ Omitidos: " + result.invalid : "")
+      );
       return;
     }
   }
