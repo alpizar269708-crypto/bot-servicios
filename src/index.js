@@ -2149,7 +2149,7 @@ async function handleMessage(msg) {
     const directParts = rawDirect.split(/\s+/).filter(Boolean);
     const directCommand = norm(directParts[0] || "");
 
-    if (directCommand === "menuporta") {
+    if (directCommand === "menucfe") {
       await send(jid,
         "📱 *MENÚ PORTA*\n\n" +
         "1. Guardartel nombre 10dígitos 2dígitos(opcional)\n" +
