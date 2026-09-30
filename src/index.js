@@ -551,8 +551,143 @@ async function collections() {
     withdrawals: db.collection(COLLECTION + "_withdrawals"),
     auth: db.collection(COLLECTION + "_auth"),
     activation: db.collection(COLLECTION + "_activation"),
-    pendingActions: db.collection(COLLECTION + "_pending_actions")
+    pendingActions: db.collection(COLLECTION + "_pending_actions"),
+    telRecords: db.collection(COLLECTION + "_tel_records"),
+    portability: db.collection(COLLECTION + "_portability")
   };
+}
+
+function isOwnerDirect(jid) {
+  const phone = phoneFromJid(jid);
+  return !!OWNER_PHONE &&
+    !!jid &&
+    jid.endsWith("@s.whatsapp.net") &&
+    phone === OWNER_PHONE;
+}
+
+function normalizeStoredName(value) {
+  return norm(String(value || "").replace(/\s+/g, " ").trim());
+}
+
+function escapeRegex(value) {
+  return String(value || "").replace(/[.*+?^$()|[\]\\]/g, "\\    pendingActions: db.collection(COLLECTION + "_pending_actions")
+  };
+}");
+}
+
+function splitNameAndPhoneArgs(args) {
+  const parts = String(args || "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return null;
+
+  const phoneIndex = parts.findIndex(x => /^\d{10}$/.test(String(x).replace(/\D/g, "")));
+  if (phoneIndex < 1) return null;
+
+  const phone = String(parts[phoneIndex]).replace(/\D/g, "");
+  let before = parts.slice(0, phoneIndex);
+  let emailSuffix = "";
+
+  if (before.length && /^\d{2}$/.test(before[before.length - 1])) {
+    emailSuffix = before.pop();
+  }
+
+  const name = before.join(" ").trim();
+  if (!name) return null;
+
+  return { name, phone, emailSuffix };
+}
+
+function splitPortabilityArgs(args) {
+  const parts = String(args || "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length < 4) return null;
+
+  let emailSuffix = "";
+  if (/^\d{2}$/.test(parts[parts.length - 1])) {
+    emailSuffix = parts.pop();
+  }
+
+  if (parts.length < 4) return null;
+
+  const keep = String(parts.pop()).replace(/\D/g, "");
+  const temporary = String(parts.pop()).replace(/\D/g, "");
+  const imei = String(parts.pop()).replace(/\D/g, "");
+  const name = parts.join(" ").trim();
+
+  if (!name || !/^\d{15}$/.test(imei) || !/^\d{10}$/.test(temporary) || !/^\d{10}$/.test(keep)) {
+    return null;
+  }
+
+  return { name, imei, temporary, keep, emailSuffix };
+}
+
+async function saveTelRecord(args, jid) {
+  const parsed = splitNameAndPhoneArgs(args);
+  if (!parsed) return { ok: false };
+
+  const c = await collections();
+  const doc = {
+    name: parsed.name,
+    normalizedName: normalizeStoredName(parsed.name),
+    phone: parsed.phone,
+    emailSuffix: parsed.emailSuffix || "",
+    createdAt: new Date(),
+    createdBy: jid
+  };
+
+  await c.telRecords.insertOne(doc);
+  return { ok: true, doc };
+}
+
+async function findTelRecords(query) {
+  const q = String(query || "").trim();
+  const nq = normalizeStoredName(q);
+  const digits = q.replace(/\D/g, "");
+  const { telRecords } = await collections();
+
+  if (/^\d{10}$/.test(digits) && !/[a-záéíóúñ]/i.test(q)) {
+    return telRecords.find({ phone: digits }).sort({ createdAt: 1 }).toArray();
+  }
+
+  if (!nq) return [];
+
+  return telRecords.find({
+    $or: [
+      { normalizedName: nq },
+      { normalizedName: { $regex: "^" + escapeRegex(nq) + "\\s" } }
+    ]
+  }).sort({ createdAt: 1 }).toArray();
+}
+
+async function savePortability(args, jid) {
+  const parsed = splitPortabilityArgs(args);
+  if (!parsed) return { ok: false };
+
+  const c = await collections();
+  const doc = {
+    name: parsed.name,
+    normalizedName: normalizeStoredName(parsed.name),
+    imei: parsed.imei,
+    temporary: parsed.temporary,
+    keep: parsed.keep,
+    emailSuffix: parsed.emailSuffix || "",
+    createdAt: new Date(),
+    createdBy: jid
+  };
+
+  await c.portability.insertOne(doc);
+  return { ok: true, doc };
+}
+
+async function findPortability(query) {
+  const nq = normalizeStoredName(query);
+  if (!nq) return [];
+  const { portability } = await collections();
+
+  return portability.find({
+    $or: [
+      { normalizedName: nq },
+      { normalizedName: { $regex: "^" + escapeRegex(nq) + "\\s" } }
+    ]
+  }).sort({ createdAt: 1 }).toArray();
 }
 
 /*
@@ -705,6 +840,9 @@ async function ensureIndexes() {
   await c.accounts.createIndex({ active: 1 });
   await c.people.createIndex({ normalizedName: 1 }, { unique: true });  await c.services.createIndex({ accountNumber: 1, status: 1 });  await c.services.createIndex({ personId: 1, status: 1 });
   await c.payments.createIndex({ accountNumber: 1 });
+  await c.telRecords.createIndex({ normalizedName: 1 });
+  await c.telRecords.createIndex({ phone: 1 });
+  await c.portability.createIndex({ normalizedName: 1 });
   await c.cycles.createIndex({ accountNumber: 1 }, { unique: true });
 }
 
@@ -1865,6 +2003,86 @@ async function handleMessage(msg) {
 
     await send(jid, "🛑 *BOT DESACTIVADO*\nYa puedes activarlo en otro grupo.");
     return;
+  }
+
+  // Comandos privados: SOLO el número dueño y SOLO por chat directo.
+  // Nunca se ejecutan en grupos ni para otros números.
+  if (isOwnerDirect(jid)) {
+    const rawDirect = text.trim().replace(/^!/, "").trim();
+    const directParts = rawDirect.split(/\s+/).filter(Boolean);
+    const directCommand = norm(directParts[0] || "");
+
+    if (directCommand === "guardartel") {
+      const result = await saveTelRecord(directParts.slice(1).join(" "), jid);
+      if (!result.ok) {
+        await send(jid, "❌ Usa: Guardartel nombre 10dígitos 2dígitos(opcional)");
+        return;
+      }
+      await send(jid,
+        "✅ *TELÉFONO GUARDADO*\\n" +
+        "👤 " + result.doc.name + "\\n" +
+        "📱 " + result.doc.phone +
+        (result.doc.emailSuffix ? "\\n✉️ .." + result.doc.emailSuffix : "")
+      );
+      return;
+    }
+
+    if (directCommand === "vertel") {
+      const query = directParts.slice(1).join(" ").trim();
+      if (!query) {
+        await send(jid, "❌ Usa: Vertel nombre");
+        return;
+      }
+      const rows = await findTelRecords(query);
+      if (!rows.length) {
+        await send(jid, "ℹ️ No encontré registros para *" + query + "*.");
+        return;
+      }
+      const body = rows.map((x, i) =>
+        (i + 1) + ". 👤 *" + x.name + "*\\n" +
+        "📱 " + x.phone +
+        (x.emailSuffix ? "  ✉️ .." + x.emailSuffix : "")
+      ).join("\\n\\n");
+      await send(jid, "📱 *TELÉFONOS*\\n\\n" + body);
+      return;
+    }
+
+    if (directCommand === "portabilidad") {
+      const result = await savePortability(directParts.slice(1).join(" "), jid);
+      if (!result.ok) {
+        await send(jid, "❌ Usa: Portabilidad nombre IMEI(15) temporal(10) conservar(10) 2dígitos(opcional)");
+        return;
+      }
+      await send(jid,
+        "✅ *PORTABILIDAD GUARDADA*\\n" +
+        "👤 " + result.doc.name + "\\n" +
+        "📱 Temporal: " + result.doc.temporary + "\\n" +
+        "🔢 Conserva: " + result.doc.keep +
+        (result.doc.emailSuffix ? "\\n✉️ .." + result.doc.emailSuffix : "")
+      );
+      return;
+    }
+
+    if (directCommand === "portafin") {
+      const query = directParts.slice(1).join(" ").trim();
+      if (!query) {
+        await send(jid, "❌ Usa: Portafin nombre");
+        return;
+      }
+      const rows = await findPortability(query);
+      if (!rows.length) {
+        await send(jid, "ℹ️ No encontré una portabilidad para *" + query + "*.");
+        return;
+      }
+      const body = rows.map((x, i) =>
+        (rows.length > 1 ? (i + 1) + ". " : "") +
+        "👤 *" + x.name + "*\\n" +
+        "📱 " + x.keep +
+        (x.emailSuffix ? "  ✉️ .." + x.emailSuffix : "")
+      ).join("\\n\\n");
+      await send(jid, "📲 *PORTABILIDAD FINAL*\\n\\n" + body);
+      return;
+    }
   }
 
   // El bot solo funciona en el único grupo que fue activado.
