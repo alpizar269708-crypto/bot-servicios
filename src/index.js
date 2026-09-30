@@ -570,11 +570,8 @@ function normalizeStoredName(value) {
 }
 
 function escapeRegex(value) {
-  return String(value || "").replace(/[.*+?^$()|[\]\\]/g, "\\    pendingActions: db.collection(COLLECTION + "_pending_actions")
-  };
-}");
+  return String(value || "").replace(/[.*+?^$()|[\]\\]/g, "\\$&");
 }
-
 function splitNameAndPhoneArgs(args) {
   const parts = String(args || "").trim().split(/\s+/).filter(Boolean);
   if (!parts.length) return null;
@@ -2011,6 +2008,17 @@ async function handleMessage(msg) {
     const rawDirect = text.trim().replace(/^!/, "").trim();
     const directParts = rawDirect.split(/\s+/).filter(Boolean);
     const directCommand = norm(directParts[0] || "");
+
+    if (directCommand === "menuporta") {
+      await send(jid,
+        "📱 *MENÚ PORTA*\\n\\n" +
+        "1. Guardartel nombre 10dígitos 2dígitos(opcional)\\n" +
+        "2. Vertel nombre\\n" +
+        "3. Portabilidad nombre IMEI(15) temporal(10) conservar(10) 2dígitos(opcional)\\n" +
+        "4. Portafin nombre"
+      );
+      return;
+    }
 
     if (directCommand === "guardartel") {
       const result = await saveTelRecord(directParts.slice(1).join(" "), jid);
