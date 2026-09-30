@@ -2236,7 +2236,7 @@ async function handleMessage(msg) {
       }
 
       // Número corto: posición del registro en Vertodos.
-      if (\d{1,6}$/.test(query)) {
+      if (/^\d{1,6}$/.test(query)) {
         const index = Number(query);
         const rows = await allTelRecords();
 
@@ -2262,7 +2262,7 @@ async function handleMessage(msg) {
       }
 
       // Teléfono exacto de 10 dígitos.
-      if (\d{10}$/.test(query) {
+      if (/^\d{10}$/.test(query)) {
         const rows = await findTelRecords(query);
 
         if (!rows.length) {
