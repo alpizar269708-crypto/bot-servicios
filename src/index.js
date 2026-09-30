@@ -2125,11 +2125,11 @@ async function handleMessage(msg) {
 
     if (directCommand === "menuporta") {
       await send(jid,
-        "📱 *MENÚ PORTA*\\n\\n" +
-        "1. Guardartel nombre 10dígitos 2dígitos(opcional)\\n" +
-        "2. Vertel nombre\\n" +
-        "3. Portabilidad nombre IMEI(15) temporal(10) conservar(10) 2dígitos(opcional)\\n" +
-        "4. Portafin nombre\\n" +
+        "📱 *MENÚ PORTA*\n\n" +
+        "1. Guardartel nombre 10dígitos 2dígitos(opcional)\n" +
+        "2. Vertel nombre\n" +
+        "3. Portabilidad nombre IMEI(15) temporal(10) conservar(10) 2dígitos(opcional)\n" +
+        "4. Portafin nombre\n" +
         "5. Guardartelmasivo + lista\n" +
         "6. Vertodos\n" +
         "7. Eliminartel número | nombre | teléfono"
@@ -2236,7 +2236,7 @@ async function handleMessage(msg) {
       }
 
       // Número corto: posición del registro en Vertodos.
-      if /^\d{1,6}$/.test(query)) {
+      if (\d{1,6}$/.test(query)) {
         const index = Number(query);
         const rows = await allTelRecords();
 
@@ -2262,7 +2262,7 @@ async function handleMessage(msg) {
       }
 
       // Teléfono exacto de 10 dígitos.
-      if /^\d{10}$/.test(query) {
+      if (\d{10}$/.test(query) {
         const rows = await findTelRecords(query);
 
         if (!rows.length) {
