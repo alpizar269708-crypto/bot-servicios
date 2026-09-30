@@ -2170,10 +2170,10 @@ async function handleMessage(msg) {
         return;
       }
       await send(jid,
-        "✅ *TELÉFONO GUARDADO*\\n" +
-        "👤 " + result.doc.name + "\\n" +
+        "✅ *TELÉFONO GUARDADO*\n" +
+        "👤 " + result.doc.name + "\n" +
         "📱 " + result.doc.phone +
-        (result.doc.emailSuffix ? "\\n✉️ .." + result.doc.emailSuffix : "")
+        (result.doc.emailSuffix ? "\n✉️ .." + result.doc.emailSuffix : "")
       );
       return;
     }
@@ -2190,11 +2190,11 @@ async function handleMessage(msg) {
         return;
       }
       const body = rows.map((x, i) =>
-        (i + 1) + ". 👤 *" + x.name + "*\\n" +
+        (i + 1) + ". 👤 *" + x.name + "*\n" +
         "📱 " + x.phone +
         (x.emailSuffix ? "  ✉️ .." + x.emailSuffix : "")
-      ).join("\\n\\n");
-      await send(jid, "📱 *TELÉFONOS*\\n\\n" + body);
+      ).join("\n\n");
+      await send(jid, "📱 *TELÉFONOS*\n\n" + body);
       return;
     }
 
@@ -2223,11 +2223,11 @@ async function handleMessage(msg) {
         return;
       }
       await send(jid,
-        "✅ *PORTABILIDAD GUARDADA*\\n" +
-        "👤 " + result.doc.name + "\\n" +
-        "📱 Temporal: " + result.doc.temporary + "\\n" +
+        "✅ *PORTABILIDAD GUARDADA*\n" +
+        "👤 " + result.doc.name + "\n" +
+        "📱 Temporal: " + result.doc.temporary + "\n" +
         "🔢 Conserva: " + result.doc.keep +
-        (result.doc.emailSuffix ? "\\n✉️ .." + result.doc.emailSuffix : "")
+        (result.doc.emailSuffix ? "\n✉️ .." + result.doc.emailSuffix : "")
       );
       return;
     }
