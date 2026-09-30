@@ -557,12 +557,38 @@ async function collections() {
   };
 }
 
-function isOwnerDirect(jid) {
-  const phone = phoneFromJid(jid);
-  return !!OWNER_PHONE &&
-    !!jid &&
-    jid.endsWith("@s.whatsapp.net") &&
-    phone === OWNER_PHONE;
+async function isOwnerDirect(jid, msg) {
+  if (!OWNER_PHONE || !jid) return false;
+  if (jid.endsWith("@g.us")) return false;
+
+  const candidates = new Set();
+
+  const addPhoneFromJid = value => {
+    const phone = phoneFromJid(value);
+    if (phone) candidates.add(phone);
+  };
+
+  addPhoneFromJid(jid);
+  addPhoneFromJid(msg?.key?.remoteJidAlt);
+  addPhoneFromJid(msg?.key?.senderPn);
+  addPhoneFromJid(msg?.key?.participantAlt);
+  addPhoneFromJid(msg?.key?.participantPn);
+
+  // WhatsApp puede entregar un chat privado como @lid.
+  // Baileys mantiene una tabla interna PN <-> LID cuando la tiene disponible.
+  if (jid.endsWith("@lid")) {
+    try {
+      const mapping = sock?.signalRepository?.lidMapping;
+      if (mapping?.getPNForLID) {
+        const pn = await mapping.getPNForLID(jid);
+        addPhoneFromJid(pn);
+      }
+    } catch (e) {
+      console.log("⚠️ No se pudo resolver LID del propietario:", e?.message || e);
+    }
+  }
+
+  return candidates.has(OWNER_PHONE);
 }
 
 function normalizeStoredName(value) {
@@ -2118,7 +2144,7 @@ async function handleMessage(msg) {
 
   // Comandos privados: SOLO el número dueño y SOLO por chat directo.
   // Nunca se ejecutan en grupos ni para otros números.
-  if (isOwnerDirect(jid)) {
+  if (await isOwnerDirect(jid, msg)) {
     const rawDirect = text.trim().replace(/^!/, "").trim();
     const directParts = rawDirect.split(/\s+/).filter(Boolean);
     const directCommand = norm(directParts[0] || "");
