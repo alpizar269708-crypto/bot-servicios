@@ -2090,7 +2090,8 @@ async function handleMessage(msg) {
         "1. Guardartel nombre 10dígitos 2dígitos(opcional)\\n" +
         "2. Vertel nombre\\n" +
         "3. Portabilidad nombre IMEI(15) temporal(10) conservar(10) 2dígitos(opcional)\\n" +
-        "4. Portafin nombre"
+        "4. Portafin nombre\\n" +
+        "5. Guardartelmasivo + lista"
       );
       return;
     }
