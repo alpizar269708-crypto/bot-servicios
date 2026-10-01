@@ -423,6 +423,14 @@ function selectionNumberFromText(text) {
 function isCancelText(text) {
   return fuzzyWord(norm(text), ["cancelar", "cancela", "cancel", "salir", "no"], 1);
 }
+function isPayAllText(text) {
+  const t = norm(text).replace(/[¿?¡!.,;:]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!t) return false;
+  if (/^(todos|todo|todas|todos los|todas las)$/.test(t)) return true;
+  if (/^(pagar|paga|pago|pagare|quiero pagar|quiero|voy a pagar)\s+(todo|todos|todas|los|las|todos los|todas las)$/.test(t)) return true;
+  if (/^(pagar|paga|pago|pagare)\s+(los|las)\s+(todos|todas)$/.test(t)) return true;
+  return false;
+}
 
 function commandOf(text) {
   const rawInput = String(text || "");
@@ -1894,6 +1902,17 @@ async function handleMessage(msg) {
   const pendingAction = await getPendingAction(jid);
   if (pendingAction && !isAdjustListText(text) && !/PAGO\s+REGISTRADO/i.test(quoted || "") && text.trim()) {
     const choiceText = text.trim();
+
+    if (pendingAction.type === "pay_select" && isPayAllText(choiceText)) {
+      const result = await payServices(pendingAction.personName, pendingAction.serviceIds || []);
+      await clearPendingAction(jid);
+      if (result.ok) {
+        await send(jid, "✅ *TODOS LOS PAGOS REGISTRADOS*\n👤 " + result.person.name + "\n🧾 " + result.count + " servicios\n💵 " + money(result.total));
+      } else {
+        await send(jid, "ℹ️ Esas deudas ya no están pendientes.");
+      }
+      return;
+    }
 
     if (isCancelText(choiceText)) {
       await clearPendingAction(jid);
