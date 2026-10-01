@@ -420,6 +420,39 @@ function selectionNumberFromText(text) {
   return null;
 }
 
+function selectionNumbersFromText(text) {
+  const raw = norm(text)
+    .replace(/\b(?:las|los|numeros|números|numero|número)\b/g, " ")
+    .replace(/\by\b/g, " ")
+    .replace(/[,;]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!raw) return [];
+
+  const numbers = [];
+  for (const part of raw.split(/\s+/).filter(Boolean)) {
+    const range = part.match(/^(\d+)-(\d+)$/);
+    if (range) {
+      const from = Number(range[1]);
+      const to = Number(range[2]);
+      const step = from <= to ? 1 : -1;
+      for (let n = from; n !== to + step; n += step) numbers.push(n);
+      continue;
+    }
+
+    if (/^\d+$/.test(part)) {
+      numbers.push(Number(part));
+      continue;
+    }
+
+    const word = numberWordToInt(part);
+    if (word) numbers.push(word);
+  }
+
+  return [...new Set(numbers)];
+}
+
 function isCancelText(text) {
   return fuzzyWord(norm(text), ["cancelar", "cancela", "cancel", "salir", "no"], 1);
 }
@@ -1414,6 +1447,54 @@ async function pendingServicesForPerson(name) {
   return { ok: true, person: p, rows };
 }
 
+async function transferServices(name, serviceIds, jid) {
+  const account = await ensureAccount();
+  const c = await collections();
+  const p = await c.people.findOne({ normalizedName: norm(name) });
+
+  if (!p) return { ok: false, reason: "not_found" };
+
+  const ids = Array.isArray(serviceIds) ? serviceIds : [];
+  if (!ids.length) return { ok: false, reason: "none", person: p };
+
+  const pending = await c.services.find({
+    _id: { $in: ids },
+    personId: p._id,
+    status: "pending"
+  }).sort({ createdAt: 1 }).toArray();
+
+  if (!pending.length) return { ok: false, reason: "none", person: p };
+
+  let total = 0;
+
+  for (const service of pending) {
+    const transferResult = await c.transfers.insertOne({
+      accountNumber: account.number,
+      personId: p._id,
+      personName: p.name,
+      amount: Number(service.amount),
+      status: "recorded",
+      serviceId: service._id,
+      createdAt: new Date(),
+      jid
+    });
+
+    await c.services.updateOne(
+      { _id: service._id, personId: p._id, status: "pending" },
+      {
+        $set: {
+          status: "transfer",
+          transferId: transferResult.insertedId
+        }
+      }
+    );
+
+    total += Number(service.amount || 0);
+  }
+
+  return { ok: true, person: p, total, count: pending.length, services: pending };
+}
+
 async function paymentNameMatches(name) {
   const c = await collections();
   const query = norm(name);
@@ -1903,6 +1984,30 @@ async function handleMessage(msg) {
   if (pendingAction && !isAdjustListText(text) && !/PAGO\s+REGISTRADO/i.test(quoted || "") && text.trim()) {
     const choiceText = text.trim();
 
+    if (pendingAction.type === "transfer_select" && isPayAllText(choiceText)) {
+      const result = await transferServices(
+        pendingAction.personName,
+        pendingAction.serviceIds || [],
+        jid
+      );
+      await clearPendingAction(jid);
+
+      if (result.ok) {
+        const transferSummary = await servicesSummary();
+        await send(jid,
+          "🔄 *TRANSFERENCIAS REGISTRADAS*\n" +
+          "👤 " + result.person.name + "\n" +
+          "🧾 " + result.count + " servicios\n" +
+          "💵 " + money(result.total) + "\n\n" +
+          "🧮 Ajuste: -" + money(result.total) + "\n" +
+          "💰 Suma actual: *" + money(transferSummary.netTotal) + "*"
+        );
+      } else {
+        await send(jid, "ℹ️ Esas deudas ya no están pendientes.");
+      }
+      return;
+    }
+
     if (pendingAction.type === "pay_select" && isPayAllText(choiceText)) {
       const result = await payServices(pendingAction.personName, pendingAction.serviceIds || []);
       await clearPendingAction(jid);
@@ -2049,6 +2154,42 @@ async function handleMessage(msg) {
       }
 
       await send(jid, "❌ Escribe el número del registro que quieres eliminar.");
+      return;
+    }
+
+    if (pendingAction.type === "transfer_select") {
+      const numbers = selectionNumbersFromText(choiceText);
+      const validNumbers = numbers.filter(n =>
+        n >= 1 && n <= pendingAction.serviceIds.length
+      );
+
+      if (!validNumbers.length) {
+        await send(jid, "❌ Escribe *todos* o los números de las deudas que quieres transferir. Ejemplo: *1 3*.");
+        return;
+      }
+
+      if (numbers.some(n => n < 1 || n > pendingAction.serviceIds.length)) {
+        await send(jid, "❌ Uno de los números no corresponde a una deuda de *" + pendingAction.personName + "*.");
+        return;
+      }
+
+      const selectedIds = validNumbers.map(n => pendingAction.serviceIds[n - 1]);
+      const result = await transferServices(pendingAction.personName, selectedIds, jid);
+      await clearPendingAction(jid);
+
+      if (result.ok) {
+        const transferSummary = await servicesSummary();
+        await send(jid,
+          "🔄 *TRANSFERENCIA REGISTRADA*\n" +
+          "👤 " + result.person.name + "\n" +
+          "🧾 " + result.count + " " + (result.count === 1 ? "servicio" : "servicios") + "\n" +
+          "💵 " + money(result.total) + "\n\n" +
+          "🧮 Ajuste: -" + money(result.total) + "\n" +
+          "💰 Suma actual: *" + money(transferSummary.netTotal) + "*"
+        );
+      } else {
+        await send(jid, "ℹ️ Esas deudas ya no están pendientes.");
+      }
       return;
     }
 
@@ -3019,8 +3160,9 @@ async function handleMessage(msg) {
 
     const a = amountFrom(args);
 
-    // Si no se indica importe, "transferencia Nombre" significa que esa
-    // persona liquidó por transferencia todas sus deudas pendientes.
+    // Si no se indica importe, buscamos las deudas pendientes de la persona.
+    // Una sola se transfiere directamente; varias requieren confirmar
+    // si quiere todas o cuáles.
     if (!a) {
       const name = args.trim();
       if (!name) {
@@ -3039,20 +3181,36 @@ async function handleMessage(msg) {
         return;
       }
 
-      for (const row of pending.rows) {
-        await addService(pending.person.name, Number(row.amount), jid, true);
+      if (pending.rows.length === 1) {
+        const result = await transferServices(pending.person.name, [pending.rows[0]._id], jid);
+        if (!result.ok) {
+          await send(jid, "ℹ️ Esa deuda ya no está pendiente.");
+          return;
+        }
+
+        const transferSummary = await servicesSummary();
+        await send(jid,
+          "🔄 *TRANSFERENCIA*\n" +
+          "👤 " + result.person.name + "\n" +
+          "💵 " + money(result.total) + "\n\n" +
+          "🧮 Ajuste: -" + money(result.total) + "\n" +
+          "💰 Suma actual: *" + money(transferSummary.netTotal) + "*"
+        );
+        return;
       }
 
-      const totalTransferido = pending.rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
-      const transferSummary = await servicesSummary();
+      await savePendingAction(jid, {
+        type: "transfer_select",
+        personName: pending.person.name,
+        serviceIds: pending.rows.map(x => x._id),
+        rows: pending.rows
+      });
 
       await send(jid,
-        "🔄 *TRANSFERENCIA*\n" +
+        "🔄 *¿TODAS O CUÁLES QUIERES TRANSFERIR?*\n\n" +
         "👤 " + pending.person.name + "\n" +
-        "🧾 " + pending.rows.length + " " + (pending.rows.length === 1 ? "servicio" : "servicios") + "\n" +
-        "💵 " + money(totalTransferido) + "\n\n" +
-        "🧮 Ajuste: -" + money(totalTransferido) + "\n" +
-        "💰 Suma actual: *" + money(transferSummary.netTotal) + "*"
+        formatDebtChoices(pending.person, pending.rows) +
+        "\n\nEscribe *todos* para transferirlas todas o escribe los números, por ejemplo *1 3*, durante los próximos 5 minutos."
       );
       return;
     }
