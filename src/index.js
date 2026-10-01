@@ -1870,7 +1870,8 @@ async function overwriteCurrentAccountFromList(jid, parsed) {
     serviceCount: summary.rows.length,
     total: summary.total,
     transferTotal: summary.transferTotal,
-    netTotal: summary.netTotal
+    netTotal: summary.netTotal,
+    accountTotal: summary.accountTotal
   };
 }
 
@@ -2621,7 +2622,7 @@ async function handleMessage(msg) {
       "🧾 Servicios: *" + result.serviceCount + "*\n" +
       "💰 Suma: *" + money(result.total) + "*\n" +
       "🔄 Transferencias: *" + money(result.transferTotal) + "*\n" +
-      "📊 Total disponible: *" + money(result.netTotal) + "*"
+      "📊 Total disponible: *" + money(result.accountTotal) + "*"
     );
     return;
   }
