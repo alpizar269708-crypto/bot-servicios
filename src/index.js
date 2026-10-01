@@ -1275,10 +1275,16 @@ async function servicesSummary() {
   const paidTotal = paid.reduce((s, x) => s + Number(x.amount || 0), 0);
   const netTotal = Number(account.initialAmount || 0) + paidTotal - withdrawnTotal;
 
+  // TOTAL GENERAL = inicio + servicios - transferencias - retiros.
+  // Aquí sí se incluyen los servicios pendientes, porque el comando
+  // "total" representa la cuenta completa, no solamente el efectivo en caja.
+  const accountTotal = total - transferTotal - withdrawnTotal;
+
   return {
     account,
     rows,
     total,
+    accountTotal,
     serviceTotal,
     transferRows,
     transferTotal,
@@ -2968,7 +2974,7 @@ async function handleMessage(msg) {
 
   if (command === "total") {
     const s = await servicesSummary();
-    await send(jid, money(s.netTotal));
+    await send(jid, money(s.accountTotal));
     return;
   }
 
