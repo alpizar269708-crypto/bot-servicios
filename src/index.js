@@ -480,6 +480,22 @@ function commandOf(text) {
   const first = words[0];
   const joined = words.join(" ");
 
+  // Deshacer movimientos: el comando va primero y el nombre después.
+  // Formas aceptadas:
+  //   deshacer pago Lali
+  //   deshacer transferencia Lali
+  //   deshacer Lali  (atajo: deshace el último pago)
+  if (fuzzyWord(first, ["deshacer", "deshace", "deshacerlo"], 2)) {
+    if (words.length >= 2 && fuzzyWord(words[1], ["pago", "pagado", "pagar", "pag"], 1)) {
+      return "deshacer_pago";
+    }
+    if (words.length >= 2 && fuzzyWord(words[1], ["transferencia", "transfer", "transf"], 2)) {
+      return "deshacer_transferencia";
+    }
+    if (words.length >= 2) return "deshacer_pago";
+    return "deshacer";
+  }
+
   // Permite marcar un deudor de la lista como transferencia por número:
   // "2 transferencia" o "transferencia 2".
   if (/^\\d+$/.test(first) && words.length === 2 && /^(transferencia|transfer|transf)$/.test(words[1])) {
@@ -1337,6 +1353,48 @@ async function undoPayment(name) {
     person: p,
     total: Number(payment.amount || 0),
     count: payment.serviceIds.length
+  };
+}
+
+async function undoTransfer(name) {
+  const account = await ensureAccount();
+  const c = await collections();
+  const p = await c.people.findOne({ normalizedName: norm(name) });
+
+  if (!p) return { ok: false, reason: "not_found" };
+
+  const transfer = await c.transfers.findOne(
+    { accountNumber: account.number, personId: p._id, status: "recorded" },
+    { sort: { createdAt: -1 } }
+  );
+
+  if (!transfer) return { ok: false, reason: "none", person: p };
+
+  // Si la transferencia estaba enlazada a un servicio, quitamos el enlace.
+  // Un servicio marcado específicamente como "transfer" vuelve a pendiente.
+  if (transfer.serviceId) {
+    await c.services.updateOne(
+      { _id: transfer.serviceId, personId: p._id, status: "transfer" },
+      {
+        $set: { status: "pending" },
+        $unset: { transferId: "" }
+      }
+    );
+
+    // Si por alguna razón el servicio conserva el enlace pero ya no está
+    // en estado transfer, al menos quitamos el transferId.
+    await c.services.updateOne(
+      { _id: transfer.serviceId, personId: p._id },
+      { $unset: { transferId: "" } }
+    );
+  }
+
+  await c.transfers.deleteOne({ _id: transfer._id });
+
+  return {
+    ok: true,
+    person: p,
+    total: Number(transfer.amount || 0)
   };
 }
 
@@ -2296,6 +2354,75 @@ async function handleMessage(msg) {
     command = "deudoresp";
   } else {
     command = commandOf(text);
+  }
+
+  if (command === "deshacer" || command === "deshacer_pago" || command === "deshacer_transferencia") {
+    let args = text.trim();
+    if (args.startsWith(PREFIX)) args = args.slice(PREFIX.length).trim();
+
+    const parts = args.split(/\\s+/).filter(Boolean);
+    if (parts.length && fuzzyWord(parts[0], ["deshacer", "deshace", "deshacerlo"], 2)) parts.shift();
+
+    let mode = command === "deshacer_transferencia" ? "transferencia" : "pago";
+    if (parts.length && fuzzyWord(parts[0], ["pago", "pagado", "pagar", "pag"], 1)) {
+      mode = "pago";
+      parts.shift();
+    } else if (parts.length && fuzzyWord(parts[0], ["transferencia", "transfer", "transf"], 2)) {
+      mode = "transferencia";
+      parts.shift();
+    }
+
+    const name = parts.join(" ").trim();
+
+    if (!name) {
+      await send(jid,
+        "❌ Escribe: *deshacer pago Lali*\n" +
+        "o: *deshacer transferencia Lali*"
+      );
+      return;
+    }
+
+    if (mode === "pago") {
+      const result = await undoPayment(name);
+
+      if (!result.ok) {
+        await send(jid,
+          result.reason === "not_found"
+            ? "❌ No encuentro a *" + name + "*."
+            : "ℹ️ No encontré un pago reciente de *" + name + "* para deshacer."
+        );
+        return;
+      }
+
+      await send(jid,
+        "↩️ *PAGO DESHECHO*\n" +
+        "👤 " + result.person.name + "\n" +
+        "💵 " + money(result.total) + "\n" +
+        "⏳ La deuda volvió a quedar pendiente."
+      );
+      return;
+    }
+
+    const result = await undoTransfer(name);
+
+    if (!result.ok) {
+      await send(jid,
+        result.reason === "not_found"
+          ? "❌ No encuentro a *" + name + "*."
+          : "ℹ️ No encontré una transferencia reciente de *" + name + "* para deshacer."
+      );
+      return;
+    }
+
+    const summary = await servicesSummary();
+    await send(jid,
+      "↩️ *TRANSFERENCIA DESHECHA*\n" +
+      "👤 " + result.person.name + "\n" +
+      "💵 " + money(result.total) + "\n" +
+      "💰 Total actual: *" + money(summary.accountTotal) + "*\n" +
+      "⏳ La deuda volvió a quedar pendiente."
+    );
+    return;
   }
 
   if (command === "activar") {
