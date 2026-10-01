@@ -480,6 +480,15 @@ function commandOf(text) {
   const first = words[0];
   const joined = words.join(" ");
 
+  // Permite marcar un deudor de la lista como transferencia por número:
+  // "2 transferencia" o "transferencia 2".
+  if (/^\\d+$/.test(first) && words.length === 2 && /^(transferencia|transfer|transf)$/.test(words[1])) {
+    return "transferencia_numero";
+  }
+  if (/^(transferencia|transfer|transf)$/.test(first) && words.length === 2 && /^\\d+$/.test(words[1])) {
+    return "transferencia_numero";
+  }
+
   // "deuda" puede quedar a 2 letras de "ayuda", por eso DEUDORES
   // debe evaluarse antes que MENU/AYUDA.
   if (words.length === 1 && fuzzyWord(first, ["deudores", "deudor", "adeudos", "adeudo", "deudas", "deuda", "pendientes"], 2)) {
@@ -3155,6 +3164,53 @@ async function handleMessage(msg) {
       "👤 " + pending.person.name + "\n" +
       formatDebtChoices(pending.person, rows) +
       "\n\nPuedes responder al mensaje o simplemente escribe el *número* (1, 2, 3...) durante los próximos 5 minutos."
+    );
+    return;
+  }
+
+  if (command === "transferencia_numero") {
+    const match = norm(text).match(/^(?:transferencia|transfer|transf)\s+(\d+)$/i) ||
+      norm(text).match(/^(\d+)\s+(?:transferencia|transfer|transf)$/i);
+    const index = match ? Number(match[1]) : 0;
+
+    if (!index || index < 1) {
+      await send(jid, "❌ Escribe, por ejemplo: *2 transferencia*.");
+      return;
+    }
+
+    const c = await collections();
+    const debtorRows = await c.services.find({
+      status: "pending",
+      personName: { $not: /^retiro$/i }
+    }).sort({ createdAt: 1 }).toArray();
+
+    const grouped = new Map();
+    for (const x of debtorRows) {
+      const key = String(x.personId);
+      if (!grouped.has(key)) grouped.set(key, { name: x.personName, rows: [] });
+      grouped.get(key).rows.push(x);
+    }
+
+    const debtor = [...grouped.values()][index - 1];
+    if (!debtor) {
+      await send(jid, "❌ El deudor número *" + index + "* no existe en la lista actual.");
+      return;
+    }
+
+    const result = await transferServices(debtor.name, debtor.rows.map(x => x._id), jid);
+    if (!result.ok) {
+      await send(jid, "ℹ️ *" + debtor.name + "* ya no tiene deudas pendientes.");
+      return;
+    }
+
+    const transferSummary = await servicesSummary();
+    await send(jid,
+      "🔄 *TRANSFERENCIA REGISTRADA*\n" +
+      "👤 " + result.person.name + "\n" +
+      "🧾 " + result.count + " servicios\n" +
+      "💵 " + money(result.total) + "\n\n" +
+      "🧮 Ajuste: -" + money(result.total) + "\n" +
+      "💰 Total actual: *" + money(transferSummary.accountTotal) + "*"
     );
     return;
   }
