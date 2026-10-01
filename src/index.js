@@ -283,6 +283,12 @@ function phoneFromJid(jid) {
   return cleanPhone(String(jid || "").split("@")[0].split(":")[0]);
 }
 
+function formatTel(phone) {
+  const digits = cleanPhone(phone);
+  if (digits.length !== 10) return digits;
+  return digits.slice(0, 3) + " " + digits.slice(3, 7) + " " + digits.slice(7);
+}
+
 function money(n) {
   return "$" + Math.round(Number(n || 0)).toLocaleString("es-MX");
 }
@@ -2017,7 +2023,7 @@ async function handleMessage(msg) {
         await send(jid,
           "✅ *TELÉFONO ELIMINADO*\n" +
           "👤 " + result.doc.name + "\n" +
-          "📱 " + result.doc.phone +
+          "📱 " + formatTel(result.doc.phone) +
           (result.doc.emailSuffix ? "  ✉️ .." + result.doc.emailSuffix : "")
         );
         return;
@@ -2172,7 +2178,7 @@ async function handleMessage(msg) {
       await send(jid,
         "✅ *TELÉFONO GUARDADO*\n" +
         "👤 " + result.doc.name + "\n" +
-        "📱 " + result.doc.phone +
+        "📱 " + formatTel(result.doc.phone) +
         (result.doc.emailSuffix ? "\n✉️ .." + result.doc.emailSuffix : "")
       );
       return;
@@ -2191,7 +2197,7 @@ async function handleMessage(msg) {
       }
       const body = rows.map((x, i) =>
         (i + 1) + ". 👤 *" + x.name + "*\n" +
-        "📱 " + x.phone +
+        "📱 " + formatTel(x.phone) +
         (x.emailSuffix ? "  ✉️ .." + x.emailSuffix : "")
       ).join("\n\n");
       await send(jid, "📱 *TELÉFONOS*\n\n" + body);
@@ -2208,7 +2214,7 @@ async function handleMessage(msg) {
 
       const body = rows.map((x, i) =>
         (i + 1) + ". 👤 *" + x.name + "*\n" +
-        "📱 " + x.phone +
+        "📱 " + formatTel(x.phone) +
         (x.emailSuffix ? "  ✉️ .." + x.emailSuffix : "")
       ).join("\n\n");
 
@@ -2246,7 +2252,7 @@ async function handleMessage(msg) {
       const body = result.records.map((x, i) =>
         (result.records.length > 1 ? (i + 1) + ". " : "") +
         "👤 *" + x.name + "*\n" +
-        "📱 " + x.phone +
+        "📱 " + formatTel(x.phone) +
         (x.emailSuffix ? "  ✉️ .." + x.emailSuffix : "")
       ).join("\n\n");
       await send(jid, "✅ *PORTABILIDAD FINALIZADA*\n\n" + body);
@@ -2281,7 +2287,7 @@ async function handleMessage(msg) {
         await send(jid,
           "✅ *TELÉFONO ELIMINADO*\n" +
           "👤 " + result.doc.name + "\n" +
-          "📱 " + result.doc.phone +
+          "📱 " + formatTel(result.doc.phone) +
           (result.doc.emailSuffix ? "  ✉️ .." + result.doc.emailSuffix : "")
         );
         return;
@@ -2323,7 +2329,7 @@ async function handleMessage(msg) {
         await send(jid,
           "✅ *TELÉFONO ELIMINADO*\n" +
           "👤 " + result.doc.name + "\n" +
-          "📱 " + result.doc.phone +
+          "📱 " + formatTel(result.doc.phone) +
           (result.doc.emailSuffix ? "  ✉️ .." + result.doc.emailSuffix : "")
         );
         return;
@@ -2364,7 +2370,7 @@ async function handleMessage(msg) {
       await send(jid,
         "✅ *TELÉFONO ELIMINADO*\n" +
         "👤 " + result.doc.name + "\n" +
-        "📱 " + result.doc.phone +
+        "📱 " + formatTel(result.doc.phone) +
         (result.doc.emailSuffix ? "  ✉️ .." + result.doc.emailSuffix : "")
       );
       return;
