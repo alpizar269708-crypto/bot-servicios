@@ -3018,8 +3018,42 @@ async function handleMessage(msg) {
     if (!args && quoted) args = quoted.replace(/^!/, "").trim();
 
     const a = amountFrom(args);
+
+    // Si no se indica importe, "transferencia Nombre" significa que esa
+    // persona liquidó por transferencia todas sus deudas pendientes.
     if (!a) {
-      await send(jid, "❌ Escribe: transferencia Fulano 250 o responde al mensaje de Fulano 250 y escribe transferencia.");
+      const name = args.trim();
+      if (!name) {
+        await send(jid, "❌ Escribe: transferencia Fulano o transferencia Fulano 250.");
+        return;
+      }
+
+      const pending = await pendingServicesForPerson(name);
+      if (!pending.ok) {
+        await send(jid, "❌ No encontré a *" + name + "*.");
+        return;
+      }
+
+      if (!pending.rows.length) {
+        await send(jid, "ℹ️ *" + pending.person.name + "* no tiene deudas pendientes.");
+        return;
+      }
+
+      for (const row of pending.rows) {
+        await addService(pending.person.name, Number(row.amount), jid, true);
+      }
+
+      const totalTransferido = pending.rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+      const transferSummary = await servicesSummary();
+
+      await send(jid,
+        "🔄 *TRANSFERENCIA*\n" +
+        "👤 " + pending.person.name + "\n" +
+        "🧾 " + pending.rows.length + " " + (pending.rows.length === 1 ? "servicio" : "servicios") + "\n" +
+        "💵 " + money(totalTransferido) + "\n\n" +
+        "🧮 Ajuste: -" + money(totalTransferido) + "\n" +
+        "💰 Suma actual: *" + money(transferSummary.netTotal) + "*"
+      );
       return;
     }
 
