@@ -1259,13 +1259,21 @@ async function servicesSummary() {
   }).sort({ createdAt: 1 }).toArray();
   const withdrawnTotal = withdrawalRows.reduce((s, x) => s + Number(x.amount || 0), 0);
 
-  // CAJA DISPONIBLE = inicio + servicios - transferencias - retiros.
-  // Los servicios cuentan para el control aunque estén pendientes o pagados.
+  // TOTAL CONTABLE = inicio + todos los servicios.
+  // Esto se conserva para corte y control, incluyendo pendientes.
   const total = Number(account.initialAmount || 0) + serviceTotal;
-  const netTotal = total - transferTotal - withdrawnTotal;
 
   const pending = rows.filter(x => x.status === "pending");
   const paid = rows.filter(x => x.status === "paid");
+
+  // CAJA DISPONIBLE = inicio + pagos en efectivo - retiros.
+  // Un servicio pendiente todavía no ha entrado a caja.
+  // Un servicio marcado como "transfer" tampoco entra a caja porque
+  // el dinero llegó por transferencia y no está físicamente en efectivo.
+  // Por eso NO debemos restar transferencias de un total que ya excluye
+  // esos servicios; hacerlo provocaría un cálculo incorrecto.
+  const paidTotal = paid.reduce((s, x) => s + Number(x.amount || 0), 0);
+  const netTotal = Number(account.initialAmount || 0) + paidTotal - withdrawnTotal;
 
   return {
     account,
