@@ -3518,7 +3518,7 @@ async function handleMessage(msg) {
             total: s.total,
             withdrawals: s.withdrawnTotal,
             transfers: s.transferTotal,
-            netTotal: s.netTotal,
+            netTotal: s.accountTotal,
             pending: s.pendingTotal,
             paid: s.paidTotal
           }
@@ -3551,7 +3551,7 @@ async function handleMessage(msg) {
       "💸 Retiros: *" + money(s.withdrawnTotal) + "*\n" +
       "⏳ Pendiente: *" + money(s.pendingTotal) + "*\n" +
       "✅ Pagado: *" + money(s.paidTotal) + "*\n\n" +
-      "📊 Final: *" + money(s.netTotal) + "*"
+      "📊 Final: *" + money(s.accountTotal) + "*"
     );
     return;
   }
@@ -3590,7 +3590,7 @@ async function handleMessage(msg) {
           "🧾 *SERVICIO " + serviceCount + "*\n" +
           "👤 " + name + "\n" +
           "💵 " + money(a.amount) + "\n\n" +
-          "💰 Total: *" + money(summary.netTotal) + "*");
+          "💰 Total: *" + money(summary.accountTotal) + "*");
       }
     }
   }
