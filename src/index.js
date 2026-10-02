@@ -286,7 +286,7 @@ function phoneFromJid(jid) {
 function formatTel(phone) {
   const digits = cleanPhone(phone);
   if (digits.length !== 10) return digits;
-  return digits.slice(0, 3) + " " + digits.slice(3, 7) + " " + digits.slice(7);
+  return digits.slice(0, 3) + " " + digits.slice(3, 6) + " " + digits.slice(6);
 }
 
 function money(n) {
@@ -2622,7 +2622,7 @@ async function handleMessage(msg) {
           await send(jid,
             "🗑️ *¿CUÁL QUIERES ELIMINAR?*\n\n" +
             rows.map((x, i) =>
-              (i + 1) + ". 👤 *" + x.name + "*\n📱 " + x.phone +
+              (i + 1) + ". 👤 *" + x.name + "*\n📱 " + formatTel(x.phone) +
               (x.emailSuffix ? "  ✉️ .." + x.emailSuffix : "")
             ).join("\n\n") +
             "\n\nEscribe el número durante 5 minutos."
