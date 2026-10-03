@@ -251,6 +251,8 @@ app.post("/iniciar", async (req, res) => {
 
 app.listen(Number(PORT), "0.0.0.0", () => console.log(`🌐 Panel listo en puerto ${PORT}`));
 
+setInterval(() => cleanupServiceUserAudit(), 60 * 60 * 1000);
+
 async function generatePairingCode() {
   if (!sock || !requestedPairingPhone || pairingInProgress) return null;
 
@@ -277,6 +279,53 @@ function norm(v) {
     .toLowerCase()
     .trim()
     .replace(/\s+/g, " ");
+}
+
+async function cleanupServiceUserAudit(options = {}) {
+  try {
+    const c = await collections();
+    const now = new Date();
+
+    if (options.atCut) {
+      // Al cerrar la cuenta, se conserva la contabilidad normal, pero se
+      // elimina la memoria de auditoría del usuario de servicios.
+      await c.services.updateMany(
+        { recordedBy: { $exists: true } },
+        { $unset: { recordedBy: "", recordedByExpiresAt: "" } }
+      );
+      await c.payments.deleteMany({
+        recordedBy: { $exists: true }
+      });
+      return;
+    }
+
+    const cutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+    // Los servicios históricos siguen existiendo para la contabilidad/deudores,
+    // pero después de 7 días dejan de aparecer en la auditoría del usuario.
+    await c.services.updateMany(
+      {
+        recordedBy: { $exists: true },
+        $or: [
+          { recordedByExpiresAt: { $lte: now } },
+          { recordedByExpiresAt: { $exists: false }, createdAt: { $lte: cutoff } }
+        ]
+      },
+      { $unset: { recordedBy: "", recordedByExpiresAt: "" } }
+    );
+
+    // Los documentos de pagos solo sirven para la memoria/auditoría y para
+    // deshacer pagos recientes; después de 7 días ya no se conservan.
+    await c.payments.deleteMany({
+      recordedBy: { $exists: true },
+      $or: [
+        { recordedByExpiresAt: { $lte: now } },
+        { recordedByExpiresAt: { $exists: false }, createdAt: { $lte: cutoff } }
+      ]
+    });
+  } catch (error) {
+    console.error("⚠️ No se pudo limpiar la auditoría de usuarios de servicios:", error?.message || error);
+  }
 }
 
 function phoneFromJid(jid) {
@@ -2136,6 +2185,7 @@ async function payServices(name, serviceIds, recordedBy = null) {
       name: recordedBy.name || recordedBy.folio || "Usuario",
       folio: recordedBy.folio || recordedBy.name || "Usuario"
     };
+    paymentDoc.recordedByExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   }
 
   await c.payments.insertOne(paymentDoc);
@@ -4105,6 +4155,7 @@ async function handleMessage(msg) {
   }
 
   if (command === "verusuarios" || command === "listapagos_numero" || command === "listapagados_numero" || command === "listaserviciosusuario_numero") {
+    await cleanupServiceUserAudit();
     if (!(await isOwnerAnywhere(jid, msg))) {
       await send(jid, "🔒 Este comando solo está disponible para el propietario.");
       return;
@@ -4169,6 +4220,7 @@ async function handleMessage(msg) {
   }
 
   if (command === "listapagos" || command === "listapagados" || command === "listaserviciosusuario") {
+    await cleanupServiceUserAudit();
     const rawArgs = text.trim().replace(/^!/, "").trim();
     let requested = rawArgs.replace(/^(listapagos|listapagados)\s*/i, "").replace(/^listaserviciosusuario\s*/i, "").trim();
     if (requested.startsWith("(") && requested.endsWith(")")) requested = requested.slice(1, -1).trim();
@@ -4790,6 +4842,8 @@ async function handleMessage(msg) {
       "✅ Pagado: *" + money(s.paidTotal) + "*\n\n" +
       "📊 Final: *" + money(s.accountTotal) + "*"
     );
+    // Al terminar el corte, borra la memoria de auditoría de usuarios.
+    await cleanupServiceUserAudit({ atCut: true });
     return;
   }
 
