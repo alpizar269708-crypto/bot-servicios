@@ -539,9 +539,9 @@ function commandOf(text) {
   // Pago múltiple: permite argumentos como "deudoresp 1-3 5".
   if (fuzzyWord(first, ["deudoresp"], 1)) return "deudoresp";
 
-  // Auditoría por usuario operativo: acepta listapagos(usuario) y listaservicios(usuario).
-  if (/^listapagos\\s*\\(.+\\)$/i.test(joined) || /^listapagos\\s+.+$/i.test(joined)) {
-    return "listapagos";
+  // Auditoría por usuario operativo: listapagos(usuario), listapagados(usuario) y listaservicios(usuario).
+  if (/^(listapagos|listapagados)\\s*\\(.+\\)$/i.test(joined) || /^(listapagos|listapagados)\\s+.+$/i.test(joined)) {
+    return first === "listapagados" ? "listapagados" : "listapagos";
   }
   if (/^listaservicios\\s*\\(.+\\)$/i.test(joined) || /^listaservicios\\s+.+$/i.test(joined)) {
     return "listaserviciosusuario";
@@ -871,7 +871,7 @@ async function handleServiceUserMessage(msg, serviceUser) {
   }
 
   // Consultas informativas del usuario operativo. No calculan ni muestran totales globales.
-  if (first === "listapagos") {
+  if (first === "listapagos" || first === "listapagados") {
     const requested = auditUserArg(parts);
     if (requested && norm(requested) !== norm(serviceUser.name || serviceUser.folio || "")) {
       await send(jid, "🔒 Solo puedes consultar tus propios registros.");
@@ -896,7 +896,7 @@ async function handleServiceUserMessage(msg, serviceUser) {
 
     const body = rows.map((x, i) =>
       (i + 1) + ". 👤 *" + x.personName + "* — " + money(x.amount) +
-      (auditDate(x.createdAt) ? " — " + auditDate(x.createdAt) : "")
+      ""
     ).join("\n");
 
     await send(jid, "💰 *PAGOS REGISTRADOS POR " + (target.name || target.folio).toUpperCase() + "*\n\n" + body);
@@ -3780,9 +3780,9 @@ async function handleMessage(msg) {
     return;
   }
 
-  if (command === "listapagos" || command === "listaserviciosusuario") {
+  if (command === "listapagos" || command === "listapagados" || command === "listaserviciosusuario") {
     const rawArgs = text.trim().replace(/^!/, "").trim();
-    let requested = rawArgs.replace(/^listapagos\\s*/i, "").replace(/^listaserviciosusuario\\s*/i, "").trim();
+    let requested = rawArgs.replace(/^(listapagos|listapagados)\\s*/i, "").replace(/^listaserviciosusuario\\s*/i, "").trim();
     if (requested.startsWith("(") && requested.endsWith(")")) requested = requested.slice(1, -1).trim();
 
     if (!requested) {
@@ -3797,7 +3797,7 @@ async function handleMessage(msg) {
     }
 
     const { payments, services } = await collections();
-    const isPayments = command === "listapagos";
+    const isPayments = command === "listapagos" || command === "listapagados";
     const rows = await (isPayments ? payments : services).find({
       "recordedBy.phone": target.phone
     }).sort({ createdAt: -1 }).toArray();
@@ -3816,7 +3816,7 @@ async function handleMessage(msg) {
     ).join("\\n");
 
     await send(jid,
-      (isPayments ? "💰 *PAGOS REGISTRADOS POR " : "🧾 *SERVICIOS REGISTRADOS POR ") +
+      (command === "listapagados" ? "💵 *PAGADOS A " : (isPayments ? "💰 *PAGOS REGISTRADOS POR " : "🧾 *SERVICIOS REGISTRADOS POR ")) +
       (target.name || target.folio).toUpperCase() + "*\\n\\n" + body
     );
     return;
