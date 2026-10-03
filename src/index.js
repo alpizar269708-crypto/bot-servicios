@@ -861,8 +861,11 @@ async function handleServiceUserMessage(msg, serviceUser) {
       "➕ *servicio 50 Maria la del barrio* — registrar un servicio.\n" +
       "💰 *pago 50 Maria la del barrio* — registrar un pago.\n" +
       "↩️ *deshacer pago Maria la del barrio* — deshacer tu último pago.\n" +
-      "🗑️ *eliminar servicio Maria la del barrio 50* — eliminar un servicio.\n\n" +
-      "👤 El nombre puede tener hasta *4 palabras*."
+      "🗑️ *eliminar servicio Maria la del barrio 50* — eliminar un servicio.\n" +
+      "💰 *listapagos* — ver los pagos que tú registraste.\n" +
+      "🧾 *listaservicios* — ver los servicios que tú registraste.\n\n" +
+      "👤 El nombre puede tener hasta *4 palabras*.\n" +
+      "🔒 Estas consultas solo muestran tus registros; no muestran totales generales."
     );
     return true;
   }
@@ -870,7 +873,11 @@ async function handleServiceUserMessage(msg, serviceUser) {
   // Consultas informativas del usuario operativo. No calculan ni muestran totales globales.
   if (first === "listapagos") {
     const requested = auditUserArg(parts);
-    const target = requested ? await resolveServiceUserForAudit(requested) : serviceUser;
+    if (requested && norm(requested) !== norm(serviceUser.name || serviceUser.folio || "")) {
+      await send(jid, "🔒 Solo puedes consultar tus propios registros.");
+      return true;
+    }
+    const target = serviceUser;
 
     if (!target) {
       await send(jid, "❌ No encuentro a ese usuario de servicios.");
@@ -898,7 +905,11 @@ async function handleServiceUserMessage(msg, serviceUser) {
 
   if (first === "listaservicios") {
     const requested = auditUserArg(parts);
-    const target = requested ? await resolveServiceUserForAudit(requested) : serviceUser;
+    if (requested && norm(requested) !== norm(serviceUser.name || serviceUser.folio || "")) {
+      await send(jid, "🔒 Solo puedes consultar tus propios registros.");
+      return true;
+    }
+    const target = serviceUser;
 
     if (!target) {
       await send(jid, "❌ No encuentro a ese usuario de servicios.");
