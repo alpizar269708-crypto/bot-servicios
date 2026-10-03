@@ -719,8 +719,7 @@ async function serviceWelcomeText(folio) {
     "• *listapagados* — personas que realizaron pagos que tú registraste.\n" +
     "• *listaservicios* — servicios que tú registraste.\n\n" +
     "💡 Escribe *menu* cuando quieras volver a ver esta guía.\n" +
-    "👤 Los nombres pueden tener hasta *4 palabras*.\n" +
-    "🔒 Este acceso no incluye totales generales, corte, transferencias ni retiros."
+    ""
   );
 }
 
@@ -2808,9 +2807,9 @@ async function handleMessage(msg) {
         { upsert: true }
       );
       await send(jid,
-        "🛑 *USUARIO DADO DE BAJA*\\n\\n" +
-        "👤 " + (target.name || target.folio || "Usuario") + "\\n" +
-        "El usuario fue eliminado de la lista de accesos.\\n" +
+        "🛑 *USUARIO DADO DE BAJA*\n\n" +
+        "👤 " + (target.name || target.folio || "Usuario") + "\n" +
+        "El usuario fue eliminado de la lista de accesos.\n" +
         "Si intenta registrarse nuevamente, necesitará autorización en el grupo."
       );
       return;
