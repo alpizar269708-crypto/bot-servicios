@@ -698,6 +698,11 @@ async function getServiceUserByJid(jid, msg = null) {
   return rows[0] || null;
 }
 
+function serviceUserLabel(user) {
+  const label = String(user?.name || user?.folio || "Usuario").trim() || "Usuario";
+  return "(" + label + ")";
+}
+
 function serviceUserNameFromArgs(text) {
   let t = String(text || "").trim().replace(/^!/, "").trim();
   const a = amountFrom(t);
@@ -779,7 +784,7 @@ async function handleServiceUserMessage(msg, arem) {
         "💰 *PAGO REGISTRADO*\n" +
         "👤 " + result.person.name + "\n" +
         "💵 " + money(result.total) + "\n" +
-        "(${serviceUser?.name || serviceUser?.folio || "Usuario"})"
+        serviceUserLabel(serviceUser)
       );
       return true;
     }
@@ -2531,9 +2536,9 @@ async function handleMessage(msg) {
 
   // El usuario operativo trabaja exclusivamente por chat privado y con permisos limitados.
   // Su flujo se corta aquí para que jamás llegue a los comandos administrativos del bot.
-  const arem = await getServiceUserByJid(jid, msg);
-  if (arem) {
-    await handleServiceUserMessage(msg, arem);
+  const serviceUser = await getServiceUserByJid(jid, msg);
+  if (serviceUser) {
+    await handleServiceUserMessage(msg, serviceUser);
     return;
   }
 
