@@ -539,6 +539,14 @@ function commandOf(text) {
   // Pago múltiple: permite argumentos como "deudoresp 1-3 5".
   if (fuzzyWord(first, ["deudoresp"], 1)) return "deudoresp";
 
+  // Auditoría por usuario operativo: acepta listapagos(usuario) y listaservicios(usuario).
+  if (/^listapagos\\s*\\(.+\\)$/i.test(joined) || /^listapagos\\s+.+$/i.test(joined)) {
+    return "listapagos";
+  }
+  if (/^listaservicios\\s*\\(.+\\)$/i.test(joined) || /^listaservicios\\s+.+$/i.test(joined)) {
+    return "listaserviciosusuario";
+  }
+
   if (fuzzyWord(joined, ["listaservicios"], 2) || fuzzyPhrase(words, ["lista servicios", "lista servicio"])) {
     return "listaservicios";
   }
