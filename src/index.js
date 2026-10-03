@@ -704,48 +704,36 @@ async function serviceWelcomeText(folio) {
     "• *lista servicios* — muestra la lista de servicios.\n" +
     "• *pagados* — muestra los pagos del ciclo.\n" +
     "• *total* — muestra el total disponible.\n" +
-    "• *listapagos(Usuario)* — auditoría de pagos registrados por un usuario.\n" +
-    "• *listapagados(Usuario)* — personas que pagaron a un usuario.\n" +
-    "• *listaservicios(Usuario)* — servicios registrados por un usuario.\n\n" +
+    "• *listapagos(Usuario)* — auditoría de pagos registrados.\n" +
+    "• *listapagados(Usuario)* — personas que han pagado.\n" +
+    "• *listaservicios(Usuario)* — servicios registrados.\n\n" +
 
     "💵 *PAGOS*\n" +
     "• *pago 50 Maria la del barrio*\n" +
     "• *50 Maria la del barrio*\n" +
     "• *deudoresp 1 3 9* o *deudoresp 1-5*\n" +
-    "• Después de *deudores*, también puedes escribir solo el número, por ejemplo *10*, para pagar al deudor #10.\n" +
-    "• *todopagado* — marca todos los deudores como pagados.\n" +
-    "• *deshacer pago Maria* — deshace el último pago.\n" +
+    "• Después de *deudores*, escribe solo el número, por ejemplo *10*, para pagar al deudor #10.\n" +
+    "• *deshacer pago Maria*\n" +
     "• *errorpago* — corrige un pago respondiendo a su mensaje.\n\n" +
-
-    "🔄 *TRANSFERENCIAS*\n" +
-    "• *transferencia Maria 50*\n" +
-    "• *2 transferencia* — transfiere al deudor #2.\n" +
-    "• *deshacer transferencia Maria* — deshace la última transferencia.\n\n" +
-
-    "💸 *RETIROS*\n" +
-    "• *retiro 5000*\n\n" +
 
     "➕ *SERVICIOS*\n" +
     "• *servicio 50 Maria la del barrio*\n" +
     "• *eliminar servicio Maria la del barrio 50*\n" +
     "• *eliminar* — también puede usarse respondiendo a un servicio.\n\n" +
 
-    "🆕 *CUENTA NUEVA*\n" +
-    "• *cuenta nueva 50000* — crea una cuenta nueva.\n" +
-    "ℹ️ Por este acceso no se muestran las cantidades de la cuenta anterior.\n\n" +
+    "💸 *RETIROS*\n" +
+    "• *retiro 5000*\n\n" +
 
-    "🛠️ *AJUSTES Y AYUDA*\n" +
-    "• *ajustelista*\n" +
-    "• *ajustetransferenciacaja Rosy 300*\n" +
+    "🧹 *AYUDA*\n" +
     "• *cancelar* — cancela una selección pendiente.\n" +
-    "• *menu* / *ayuda*\n" +
-    "• *menuextra* — ayuda avanzada.\n" +
-    "• *menusecreto* — comandos adicionales.\n\n" +
+    "• *menu* / *ayuda* — muestra las opciones disponibles.\n\n" +
 
-    "🔒 *ÚNICA RESTRICCIÓN*\n" +
-    "• *corte* no está disponible para este acceso.\n\n" +
-
-    "💡 El resto de funciones del bot funciona igual que para un usuario normal."
+    "🔒 *RESTRICCIONES DE ESTE ACCESO*\n" +
+    "• No tiene acceso a *corte*.\n" +
+    "• No puede crear *cuenta nueva*.\n" +
+    "• No puede usar *transferencias* ni deshacer transferencias.\n" +
+    "• No puede usar *todopagado*.\n" +
+    "• No puede usar *ajustes*, *menuextra* ni *menusecreto*."
   );
 }
 
@@ -3180,6 +3168,26 @@ async function handleMessage(msg) {
     command = "deudoresp";
   } else {
     command = commandOf(text);
+  }
+
+  if (serviceUser) {
+    const blockedServiceCommands = new Set([
+      "corte",
+      "cuenta_nueva",
+      "transferencia",
+      "transferencia_numero",
+      "deshacer_transferencia",
+      "ajustelista",
+      "ajustetransferenciacaja",
+      "todopagado",
+      "menuextra",
+      "menusecreto"
+    ]);
+
+    if (blockedServiceCommands.has(command)) {
+      await send(jid, "🔒 Ese comando no está disponible para tu acceso.");
+      return;
+    }
   }
 
   if (command === "deshacer" || command === "deshacer_pago" || command === "deshacer_transferencia") {
