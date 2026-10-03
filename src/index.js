@@ -1055,7 +1055,7 @@ async function handleServiceUserMessage(msg, serviceUser) {
       return true;
     }
 
-    const result = await payServices(matchedPerson.name, [rows[0]._id]);
+    const result = await payServices(matchedPerson.name, [rows[0]._id], serviceUser);
     if (!result.ok) {
       await send(jid, "ℹ️ Esa deuda ya no está pendiente.");
       return true;
