@@ -4128,7 +4128,7 @@ async function handleMessage(msg) {
       return;
     }
 
-    const match = String(text || "").trim().replace(/^!/, "").trim().match(/^(listapagos|listapagados|listaservicios)(\\d+)$/i);
+    const match = String(text || "").trim().replace(/^!/, "").trim().match(/^(listapagos|listapagados|listaservicios)(\d+)$/i);
     const index = match ? Number(match[2]) : 0;
     const target = index > 0 ? users[index - 1] : null;
 
