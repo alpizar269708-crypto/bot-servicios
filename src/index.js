@@ -625,7 +625,8 @@ async function collections() {
     activation: db.collection(COLLECTION + "_activation"),
     pendingActions: db.collection(COLLECTION + "_pending_actions"),
     telRecords: db.collection(COLLECTION + "_tel_records"),
-    portability: db.collection(COLLECTION + "_portability")
+    portability: db.collection(COLLECTION + "_portability"),
+    aremUsers: db.collection(COLLECTION + "_arem_users")
   };
 }
 
@@ -661,6 +662,427 @@ async function isOwnerDirect(jid, msg) {
   }
 
   return candidates.has(OWNER_PHONE);
+}
+
+
+async function getAremUserByJid(jid, msg = null) {
+  if (!jid || jid.endsWith("@g.us")) return null;
+  const candidates = new Set();
+
+  const add = value => {
+    const phone = phoneFromJid(value);
+    if (phone) candidates.add(phone);
+  };
+
+  add(jid);
+  add(msg?.key?.remoteJidAlt);
+  add(msg?.key?.senderPn);
+  add(msg?.key?.participantAlt);
+  add(msg?.key?.participantPn);
+
+  if (jid.endsWith("@lid")) {
+    try {
+      const mapping = sock?.signalRepository?.lidMapping;
+      if (mapping?.getPNForLID) add(await mapping.getPNForLID(jid));
+    } catch {}
+  }
+
+  if (!candidates.size) return null;
+
+  const { aremUsers } = await collections();
+  const rows = await aremUsers.find({
+    phone: { $in: [...candidates] },
+    active: true
+  }).limit(1).toArray();
+
+  return rows[0] || null;
+}
+
+function aremNameFromArgs(text) {
+  let t = String(text || "").trim().replace(/^!/, "").trim();
+  const a = amountFrom(t);
+  if (!a) return null;
+
+  const name = cleanName(t, a.raw).trim();
+  const words = name.split(/\s+/).filter(Boolean);
+
+  if (!name || words.length > 4) return null;
+
+  return { amount: a.amount, name, words };
+}
+
+function aremCommandParts(text) {
+  return String(text || "")
+    .trim()
+    .replace(/^!/, "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+async function aremGroupJid() {
+  const { activation } = await collections();
+  const active = await activation.findOne({ _id: "active" });
+  return active?.jid || null;
+}
+
+async function sendAremGroupNotice(text) {
+  const groupJid = await aremGroupJid();
+  if (!groupJid) return false;
+  await send(groupJid, text);
+  return true;
+}
+
+async function handleAremMessage(msg, arem) {
+  const jid = msg.key.remoteJid;
+  const text =
+    msg.message?.conversation ||
+    msg.message?.extendedTextMessage?.text ||
+    msg.message?.imageMessage?.caption ||
+    msg.message?.videoMessage?.caption ||
+    "";
+
+  const parts = aremCommandParts(text);
+  if (!parts.length) return true;
+
+  const first = norm(parts[0]);
+  const joined = parts.map(norm).join(" ");
+
+  // Selecciones pendientes exclusivas de Arem.
+  const pending = await getPendingAction(jid);
+  if (pending && (pending.type === "arem_pay_select" || pending.type === "arem_delete_select")) {
+    const n = selectionNumberFromText(text.trim());
+
+    if (!n || !pending.rows?.[n - 1]) {
+      await send(jid, "❌ Escribe el número de la opción que quieres seleccionar.");
+      return true;
+    }
+
+    const selected = pending.rows[n - 1];
+    await clearPendingAction(jid);
+
+    if (pending.type === "arem_pay_select") {
+      const result = await payServices(pending.personName, [selected._id]);
+
+      if (!result.ok) {
+        await send(jid, "ℹ️ Esa deuda ya no está pendiente.");
+        return true;
+      }
+
+      await send(jid,
+        "✅ *Pago registrado*\n\n" +
+        "👤 " + result.person.name + "\n" +
+        "💵 " + money(result.total)
+      );
+
+      await sendAremGroupNotice(
+        "💰 *PAGO REGISTRADO*\n" +
+        "👤 " + result.person.name + "\n" +
+        "💵 " + money(result.total) + "\n" +
+        "*(Arem)*"
+      );
+      return true;
+    }
+
+    const result = await deleteService(selected._id);
+    if (!result.ok) {
+      await send(jid, "ℹ️ Ese servicio ya no existe.");
+      return true;
+    }
+
+    await send(jid,
+      "🗑️ *Servicio eliminado*\n\n" +
+      "👤 " + result.service.personName + "\n" +
+      "💵 " + money(result.service.amount)
+    );
+
+    await sendAremGroupNotice(
+      "🗑️ *SERVICIO ELIMINADO*\n" +
+      "👤 " + result.service.personName + "\n" +
+      "💵 " + money(result.service.amount) + "\n" +
+      "*(Arem)*"
+    );
+    return true;
+  }
+
+  if (first === "menu" || first === "ayuda") {
+    await send(jid,
+      "👋 *MENÚ DE SERVICIOS*\n\n" +
+      "📋 *lista servicios* — ver deudores pendientes.\n" +
+      "➕ *servicio 50 Maria la del barrio* — registrar un servicio.\n" +
+      "💰 *pago 50 Maria la del barrio* — registrar un pago.\n" +
+      "↩️ *deshacer pago Maria la del barrio* — deshacer tu último pago.\n" +
+      "🗑️ *eliminar servicio Maria la del barrio 50* — eliminar un servicio.\n\n" +
+      "👤 El nombre puede tener hasta *4 palabras*."
+    );
+    return true;
+  }
+
+  if (
+    first === "listaservicios" ||
+    (first === "lista" && norm(parts[1] || "") === "servicios") ||
+    (first === "deudores" && parts.length === 1)
+  ) {
+    const { services } = await collections();
+    const rows = await services.find({
+      status: "pending",
+      personName: { $not: /^retiro$/i }
+    }).sort({ createdAt: 1 }).toArray();
+
+    if (!rows.length) {
+      await send(jid, "✅ No hay deudores pendientes.");
+      return true;
+    }
+
+    const grouped = new Map();
+    for (const x of rows) {
+      const key = String(x.personId);
+      if (!grouped.has(key)) grouped.set(key, { name: x.personName, total: 0, rows: [] });
+      const g = grouped.get(key);
+      g.total += Number(x.amount || 0);
+      g.rows.push(x);
+    }
+
+    const body = [...grouped.values()].map((g, i) =>
+      (i + 1) + ". 👤 *" + g.name + "* — " + money(g.total)
+    ).join("\n");
+
+    await send(jid, "👥 *DEUDORES*\n\n" + body);
+    return true;
+  }
+
+  if (first === "servicio" || first === "registrarservicio") {
+    const parsed = aremNameFromArgs(parts.slice(1).join(" "));
+    if (!parsed) {
+      await send(jid, "❌ Usa: *servicio 50 Maria la del barrio*\nEl nombre puede tener hasta 4 palabras.");
+      return true;
+    }
+
+    const type = await addService(parsed.name, parsed.amount, jid, false);
+    if (type !== "service") {
+      await send(jid, "❌ No pude registrar el servicio.");
+      return true;
+    }
+
+    await send(jid,
+      "✅ *Servicio registrado*\n\n" +
+      "👤 " + parsed.name + "\n" +
+      "💵 " + money(parsed.amount)
+    );
+
+    const summary = await servicesSummary();
+    const serviceCount = summary.rows.length;
+
+    await sendAremGroupNotice(
+      "🧾 *SERVICIO " + serviceCount + "*\n" +
+      "👤 " + parsed.name + "\n" +
+      "💵 " + money(parsed.amount) + "\n" +
+      "*(Arem)*"
+    );
+    return true;
+  }
+
+  if (first === "pago" || first === "pagar" || first === "pag") {
+    const rest = parts.slice(1).join(" ");
+    const parsed = aremNameFromArgs(rest);
+
+    if (!parsed) {
+      await send(jid, "❌ Usa: *pago 50 Maria la del barrio*\nEl nombre puede tener hasta 4 palabras.");
+      return true;
+    }
+
+    const nameMatches = await paymentNameMatches(parsed.name);
+    if (!nameMatches.length) {
+      await send(jid, "❌ No encuentro a *" + parsed.name + "*.");
+      return true;
+    }
+
+    if (nameMatches.length > 1) {
+      await send(jid,
+        "👤 *¿A CUÁL TE REFIERES?*\n\n" +
+        nameMatches.map((p, i) => (i + 1) + ". " + p.name).join("\n") +
+        "\n\nEscribe el número."
+      );
+      return true;
+    }
+
+    const matchedPerson = nameMatches[0];
+    const pendingServices = await pendingServicesForPerson(matchedPerson.name);
+
+    if (!pendingServices.ok || !pendingServices.rows.length) {
+      await send(jid, "ℹ️ *" + matchedPerson.name + "* no tiene esa deuda pendiente.");
+      return true;
+    }
+
+    const rows = pendingServices.rows.filter(x => Number(x.amount) === Number(parsed.amount));
+
+    if (!rows.length) {
+      await send(jid, "ℹ️ *" + matchedPerson.name + "* no tiene una deuda de " + money(parsed.amount) + ".");
+      return true;
+    }
+
+    if (rows.length > 1) {
+      await savePendingAction(jid, {
+        type: "arem_pay_select",
+        personName: matchedPerson.name,
+        rows
+      });
+
+      await send(jid,
+        "💰 *¿QUÉ PAGO QUIERES REGISTRAR?*\n\n" +
+        "👤 " + matchedPerson.name + "\n" +
+        rows.map((x, i) => (i + 1) + ". " + money(x.amount)).join("\n") +
+        "\n\nEscribe el número."
+      );
+      return true;
+    }
+
+    const result = await payServices(matchedPerson.name, [rows[0]._id]);
+    if (!result.ok) {
+      await send(jid, "ℹ️ Esa deuda ya no está pendiente.");
+      return true;
+    }
+
+    await send(jid,
+      "✅ *Pago registrado*\n\n" +
+      "👤 " + result.person.name + "\n" +
+      "💵 " + money(result.total)
+    );
+
+    await sendAremGroupNotice(
+      "💰 *PAGO REGISTRADO*\n" +
+      "👤 " + result.person.name + "\n" +
+      "💵 " + money(result.total) + "\n" +
+      "*(Arem)*"
+    );
+    return true;
+  }
+
+  if (first === "deshacer" || first === "deshacerpago" || (first === "deshacer" && norm(parts[1] || "") === "pago")) {
+    let nameParts = parts.slice(1);
+    if (norm(nameParts[0] || "") === "pago") nameParts.shift();
+    const name = nameParts.join(" ").trim();
+
+    if (!name || name.split(/\s+/).length > 4) {
+      await send(jid, "❌ Usa: *deshacer pago Maria la del barrio*.");
+      return true;
+    }
+
+    const result = await undoPayment(name);
+    if (!result.ok) {
+      await send(jid,
+        result.reason === "not_found"
+          ? "❌ No encuentro a *" + name + "*."
+          : "ℹ️ No encontré un pago reciente de *" + name + "* para deshacer."
+      );
+      return true;
+    }
+
+    await send(jid,
+      "↩️ *Pago deshecho*\n\n" +
+      "👤 " + result.person.name + "\n" +
+      "💵 " + money(result.total)
+    );
+
+    await sendAremGroupNotice(
+      "↩️ *PAGO DESHECHO*\n" +
+      "👤 " + result.person.name + "\n" +
+      "💵 " + money(result.total) + "\n" +
+      "*(Arem)*"
+    );
+    return true;
+  }
+
+  if (first === "eliminar" || first === "borrar") {
+    let restParts = parts.slice(1);
+    if (norm(restParts[0] || "") === "servicio") restParts.shift();
+
+    const rest = restParts.join(" ");
+    const a = amountFrom(rest);
+    const name = a ? cleanName(rest, a.raw) : rest.trim();
+
+    if (!name || name.split(/\s+/).length > 4) {
+      await send(jid, "❌ Usa: *eliminar servicio Maria la del barrio 50*.");
+      return true;
+    }
+
+    const pendingServices = await allServicesForPerson(name);
+    if (!pendingServices.ok || !pendingServices.rows.length) {
+      await send(jid, "ℹ️ No encontré servicios de *" + name + "*.");
+      return true;
+    }
+
+    let rows = pendingServices.rows;
+    if (a) rows = rows.filter(x => Number(x.amount) === Number(a.amount));
+
+    if (!rows.length) {
+      await send(jid, "ℹ️ No encontré ese servicio de *" + name + "*.");
+      return true;
+    }
+
+    if (rows.length > 1) {
+      await savePendingAction(jid, {
+        type: "arem_delete_select",
+        personName: name,
+        rows
+      });
+
+      await send(jid,
+        "🗑️ *¿QUÉ SERVICIO QUIERES ELIMINAR?*\n\n" +
+        "👤 " + name + "\n" +
+        rows.map((x, i) => (i + 1) + ". " + money(x.amount)).join("\n") +
+        "\n\nEscribe el número."
+      );
+      return true;
+    }
+
+    const result = await deleteService(rows[0]._id);
+    if (!result.ok) {
+      await send(jid, "ℹ️ Ese servicio ya no existe.");
+      return true;
+    }
+
+    await send(jid,
+      "🗑️ *Servicio eliminado*\n\n" +
+      "👤 " + result.service.personName + "\n" +
+      "💵 " + money(result.service.amount)
+    );
+
+    await sendAremGroupNotice(
+      "🗑️ *SERVICIO ELIMINADO*\n" +
+      "👤 " + result.service.personName + "\n" +
+      "💵 " + money(result.service.amount) + "\n" +
+      "*(Arem)*"
+    );
+    return true;
+  }
+
+  // También acepta directamente: "50 Maria la del barrio" como alta de servicio.
+  if (/^\$?\d+(?:[.,]\d{1,2})?\s+/.test(text.trim())) {
+    const parsed = aremNameFromArgs(text);
+    if (parsed) {
+      await addService(parsed.name, parsed.amount, jid, false);
+
+      await send(jid,
+        "✅ *Servicio registrado*\n\n" +
+        "👤 " + parsed.name + "\n" +
+        "💵 " + money(parsed.amount)
+      );
+
+      const summary = await servicesSummary();
+      await sendAremGroupNotice(
+        "🧾 *SERVICIO " + summary.rows.length + "*\n" +
+        "👤 " + parsed.name + "\n" +
+        "💵 " + money(parsed.amount) + "\n" +
+        "*(Arem)*"
+      );
+      return true;
+    }
+  }
+
+  // Cualquier otro comando queda simplemente sin acción administrativa.
+  await send(jid, "ℹ️ Usa *menu* para ver las opciones disponibles.");
+  return true;
 }
 
 function normalizeStoredName(value) {
@@ -1028,6 +1450,7 @@ async function ensureIndexes() {
   await c.telRecords.createIndex({ normalizedName: 1 });
   await c.telRecords.createIndex({ phone: 1 });
   await c.portability.createIndex({ normalizedName: 1 });
+  await c.aremUsers.createIndex({ phone: 1 }, { unique: true });
   await c.cycles.createIndex({ accountNumber: 1 }, { unique: true });
 }
 
@@ -2057,6 +2480,14 @@ async function handleMessage(msg) {
 
   const quoted = quotedText(msg);
 
+  // Arem trabaja exclusivamente por chat privado y con permisos operativos limitados.
+  // Su flujo se corta aquí para que jamás llegue a los comandos administrativos del bot.
+  const arem = await getAremUserByJid(jid, msg);
+  if (arem) {
+    await handleAremMessage(msg, arem);
+    return;
+  }
+
   // Si se responde a un PAGO REGISTRADO y se escribe "error" o una
   // variante con faltas, se deshace ese pago y el servicio vuelve a pendiente.
   let command;
@@ -2465,6 +2896,46 @@ async function handleMessage(msg) {
     const rawDirect = text.trim().replace(/^!/, "").trim();
     const directParts = rawDirect.split(/\s+/).filter(Boolean);
     const directCommand = norm(directParts[0] || "");
+
+    if (directCommand === "activarserviciosarem") {
+      const phone = cleanPhone(directParts.slice(1).join(" "));
+
+      if (!phone || phone.length < 10) {
+        await send(jid, "❌ Usa: *activarserviciosarem 521XXXXXXXXXX*");
+        return;
+      }
+
+      const { aremUsers } = await collections();
+      await aremUsers.updateMany({ active: true }, { $set: { active: false, updatedAt: new Date() } });
+      await aremUsers.updateOne(
+        { phone },
+        {
+          $set: {
+            phone,
+            name: "Arem",
+            active: true,
+            activatedAt: new Date(),
+            updatedAt: new Date()
+          }
+        },
+        { upsert: true }
+      );
+
+      await send(jid,
+        "✅ *AREM ACTIVADO*\n\n" +
+        "📱 " + phone + "\n" +
+        "👤 Arem\n\n" +
+        "Puede escribirle directamente al número del bot para usar sus funciones de servicios."
+      );
+      return;
+    }
+
+    if (directCommand === "desactivarserviciosarem") {
+      const { aremUsers } = await collections();
+      await aremUsers.updateMany({ active: true }, { $set: { active: false, updatedAt: new Date() } });
+      await send(jid, "✅ *AREM DESACTIVADO*");
+      return;
+    }
 
     if (directCommand === "menucfe") {
       await send(jid,
