@@ -3242,7 +3242,7 @@ async function handleMessage(msg) {
     const directCommand = norm(directParts[0] || "");
 
     // Comando interno y oculto: baja definitiva del usuario de servicios.
-    const bajaMatch = rawDirect.match(/^bajaservicios(?:\\s+(.+)|\\((.*)\\))$/i);
+    const bajaMatch = rawDirect.match(/^bajaservicios(?:\s+(.+)|\((.*)\))$/i);
     if (bajaMatch) {
       const rawName = String(bajaMatch[1] || bajaMatch[2] || "").trim();
       if (!rawName) return;
