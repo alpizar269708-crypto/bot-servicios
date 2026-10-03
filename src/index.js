@@ -251,8 +251,6 @@ app.post("/iniciar", async (req, res) => {
 
 app.listen(Number(PORT), "0.0.0.0", () => console.log(`🌐 Panel listo en puerto ${PORT}`));
 
-setInterval(() => cleanupServiceUserAudit(), 60 * 60 * 1000);
-
 async function generatePairingCode() {
   if (!sock || !requestedPairingPhone || pairingInProgress) return null;
 
@@ -283,50 +281,26 @@ function norm(v) {
 
 async function cleanupServiceUserAudit(options = {}) {
   try {
+    if (!options.atCut) return;
+
     const c = await collections();
-    const now = new Date();
 
-    if (options.atCut) {
-      // Al cerrar la cuenta, se conserva la contabilidad normal, pero se
-      // elimina la memoria de auditoría del usuario de servicios.
-      await c.services.updateMany(
-        { recordedBy: { $exists: true } },
-        { $unset: { recordedBy: "", recordedByExpiresAt: "" } }
-      );
-      await c.payments.deleteMany({
-        recordedBy: { $exists: true }
-      });
-      return;
-    }
-
-    const cutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-
-    // Los servicios históricos siguen existiendo para la contabilidad/deudores,
-    // pero después de 7 días dejan de aparecer en la auditoría del usuario.
+    // La auditoría de usuarios de servicios es SOLO información de control.
+    // Al cerrar el corte se conserva la contabilidad normal, pero se borra
+    // toda la memoria de quién registró servicios/pagos en el ciclo anterior.
     await c.services.updateMany(
-      {
-        recordedBy: { $exists: true },
-        $or: [
-          { recordedByExpiresAt: { $lte: now } },
-          { recordedByExpiresAt: { $exists: false }, createdAt: { $lte: cutoff } }
-        ]
-      },
+      { recordedBy: { $exists: true } },
       { $unset: { recordedBy: "", recordedByExpiresAt: "" } }
     );
 
-    // Los documentos de pagos solo sirven para la memoria/auditoría y para
-    // deshacer pagos recientes; después de 7 días ya no se conservan.
     await c.payments.deleteMany({
-      recordedBy: { $exists: true },
-      $or: [
-        { recordedByExpiresAt: { $lte: now } },
-        { recordedByExpiresAt: { $exists: false }, createdAt: { $lte: cutoff } }
-      ]
+      recordedBy: { $exists: true }
     });
   } catch (error) {
     console.error("⚠️ No se pudo limpiar la auditoría de usuarios de servicios:", error?.message || error);
   }
 }
+
 
 function phoneFromJid(jid) {
   return cleanPhone(String(jid || "").split("@")[0].split(":")[0]);
@@ -2185,7 +2159,6 @@ async function payServices(name, serviceIds, recordedBy = null) {
       name: recordedBy.name || recordedBy.folio || "Usuario",
       folio: recordedBy.folio || recordedBy.name || "Usuario"
     };
-    paymentDoc.recordedByExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   }
 
   await c.payments.insertOne(paymentDoc);
@@ -4155,7 +4128,6 @@ async function handleMessage(msg) {
   }
 
   if (command === "verusuarios" || command === "listapagos_numero" || command === "listapagados_numero" || command === "listaserviciosusuario_numero") {
-    await cleanupServiceUserAudit();
     if (!(await isOwnerAnywhere(jid, msg))) {
       await send(jid, "🔒 Este comando solo está disponible para el propietario.");
       return;
@@ -4220,7 +4192,6 @@ async function handleMessage(msg) {
   }
 
   if (command === "listapagos" || command === "listapagados" || command === "listaserviciosusuario") {
-    await cleanupServiceUserAudit();
     const rawArgs = text.trim().replace(/^!/, "").trim();
     let requested = rawArgs.replace(/^(listapagos|listapagados)\s*/i, "").replace(/^listaserviciosusuario\s*/i, "").trim();
     if (requested.startsWith("(") && requested.endsWith(")")) requested = requested.slice(1, -1).trim();
@@ -4714,7 +4685,52 @@ async function handleMessage(msg) {
       return;
     }
 
-    // El corte envía exactamente 3 mensajes y en este orden:
+    // Primero se envía la información de CONTROL de los usuarios de servicios.
+    // Esta información pertenece al ciclo que se está cerrando y se borra
+    // después de terminar el corte.
+    const { serviceUsers: activeServiceUsers } = await collections();
+    const activeUsersForAudit = await activeServiceUsers.find({ active: true })
+      .sort({ activatedAt: 1, name: 1 })
+      .toArray();
+
+    for (const user of activeUsersForAudit) {
+      const { payments: auditPayments, services: auditServices } = await collections();
+      const [userServices, userPayments] = await Promise.all([
+        auditServices.find({ "recordedBy.phone": user.phone })
+          .sort({ createdAt: 1 })
+          .toArray(),
+        auditPayments.find({ "recordedBy.phone": user.phone })
+          .sort({ createdAt: 1 })
+          .toArray()
+      ]);
+
+      const label = String(user.name || user.folio || "Usuario").trim();
+
+      const serviceBody = userServices.length
+        ? userServices.map((x, i) =>
+            (i + 1) + ". 👤 *" + x.personName + "* — " + money(x.amount) +
+            (auditDate(x.createdAt) ? " — " + auditDate(x.createdAt) : "")
+          ).join("\n")
+        : "Sin servicios registrados.";
+
+      const paymentBody = userPayments.length
+        ? userPayments.map((x, i) =>
+            (i + 1) + ". 👤 *" + x.personName + "* — " + money(x.amount) +
+            (auditDate(x.createdAt) ? " — " + auditDate(x.createdAt) : "")
+          ).join("\n")
+        : "Sin pagos registrados.";
+
+      await send(jid,
+        "🧾 *CONTROL DE " + label.toUpperCase() + "*\n\n" +
+        "🛠️ *SERVICIOS REGISTRADOS POR " + label.toUpperCase() + "*\n" +
+        serviceBody + "\n\n" +
+        "💵 *PAGOS REGISTRADOS POR / PAGADOS A " + label.toUpperCase() + "*\n" +
+        paymentBody
+      );
+    }
+
+    // El resto del corte continúa exactamente después del control de usuarios.
+    // El corte envía después:
     // 1) lista de servicios
     // 2) lista de deudores
     // 3) resumen del corte
