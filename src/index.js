@@ -2702,52 +2702,6 @@ async function handleMessage(msg) {
 
   const quoted = quotedText(msg);
 
-  // El propio usuario activa su acceso y el bot obtiene automáticamente su número de WhatsApp.
-  if (!jid.endsWith("@g.us")) {
-    const rawActivation = text.trim().replace(/^!/, "").trim();
-    const activationMatch = rawActivation.match(/^activarservicios(?:\s+(.+)|\((.*)\))$/i);
-
-    if (activationMatch) {
-      const folio = String(activationMatch[1] || activationMatch[2] || "").trim();
-      if (!folio) {
-        await send(jid, "❌ Usa: *activarservicios Usuario* o *activarservicios(Usuario)*");
-        return;
-      }
-
-      const phoneCandidates = new Set();
-      const addPhone = value => { const p = phoneFromJid(value); if (p) phoneCandidates.add(p); };
-      addPhone(jid);
-      addPhone(msg?.key?.remoteJidAlt);
-      addPhone(msg?.key?.senderPn);
-      addPhone(msg?.key?.participantAlt);
-      addPhone(msg?.key?.participantPn);
-
-      if (jid.endsWith("@lid")) {
-        try {
-          const mapping = sock?.signalRepository?.lidMapping;
-          if (mapping?.getPNForLID) addPhone(await mapping.getPNForLID(jid));
-        } catch {}
-      }
-
-      const phone = [...phoneCandidates][0];
-      if (!phone) {
-        await send(jid, "❌ No pude identificar tu número de WhatsApp.");
-        return;
-      }
-
-      const { serviceUsers } = await collections();
-      await serviceUsers.updateMany({ active: true }, { $set: { active: false, updatedAt: new Date() } });
-      await serviceUsers.updateOne(
-        { phone },
-        { $set: { phone, name: folio, folio, active: true, activatedAt: new Date(), updatedAt: new Date() } },
-        { upsert: true }
-      );
-
-      await send(jid, "✅ *USUARIO DE SERVICIOS ACTIVADO*\n\n👤 " + folio + "\n📱 " + phone + "\n\nYa puedes usar *menu* para registrar servicios y pagos.");
-      return;
-    }
-  }
-
   // El usuario operativo trabaja exclusivamente por chat privado y con permisos limitados.
   // Su flujo se corta aquí para que jamás llegue a los comandos administrativos del bot.
   // Alta por privado. Si el número fue dado de baja, requiere autorización en el grupo.
@@ -2823,6 +2777,43 @@ async function handleMessage(msg) {
     if (blockedPhoneCandidates.length) {
       const blocked = await serviceUserBlocks.findOne({ phone: { $in: blockedPhoneCandidates } });
       if (blocked) return;
+    }
+  }
+
+  // Los comandos ocultos del propietario deben evaluarse antes del flujo del usuario de servicios.
+  // Así el propietario puede administrar bajas aunque también tenga acceso operativo.
+  if (await isOwnerDirect(jid, msg) && !jid.endsWith("@g.us")) {
+    const rawDirectOwner = text.trim().replace(/^!/, "").trim();
+    const bajaOwnerMatch = rawDirectOwner.match(/^bajaservicios(?:\\s+(.+)|\\((.*)\\))$/i);
+    if (bajaOwnerMatch) {
+      const rawName = String(bajaOwnerMatch[1] || bajaOwnerMatch[2] || "").trim();
+      if (!rawName) return;
+      const { serviceUsers, serviceUserBlocks } = await collections();
+      const target = await serviceUsers.findOne({
+        active: true,
+        $or: [
+          { name: { $regex: "^" + escapeRegex(rawName) + "$", $options: "i" } },
+          { folio: { $regex: "^" + escapeRegex(rawName) + "$", $options: "i" } },
+          { phone: rawName }
+        ]
+      });
+      if (!target) {
+        await send(jid, "ℹ️ No encontré un usuario de servicios activo con ese nombre.");
+        return;
+      }
+      await serviceUsers.deleteOne({ _id: target._id });
+      await serviceUserBlocks.updateOne(
+        { phone: target.phone },
+        { $set: { phone: target.phone, name: target.name || target.folio || "Usuario", blockedAt: new Date() } },
+        { upsert: true }
+      );
+      await send(jid,
+        "🛑 *USUARIO DADO DE BAJA*\\n\\n" +
+        "👤 " + (target.name || target.folio || "Usuario") + "\\n" +
+        "El usuario fue eliminado de la lista de accesos.\\n" +
+        "Si intenta registrarse nuevamente, necesitará autorización en el grupo."
+      );
+      return;
     }
   }
 
