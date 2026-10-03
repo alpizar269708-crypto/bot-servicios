@@ -526,7 +526,7 @@ function commandOf(text) {
   // listapagos1, listapagados1, listaservicios1.
   // Así no hace falta escribir el nombre exacto.
   if (words.length === 1) {
-    const indexed = first.match(/^(listapagos|listapagados|listaservicios)(\\d+)$/i);
+    const indexed = first.match(/^(listapagos|listapagados|listaservicios)(\d+)$/i);
     if (indexed) return indexed[1].toLowerCase() === "listaservicios"
       ? "listaserviciosusuario_numero"
       : indexed[1].toLowerCase() + "_numero";
