@@ -626,7 +626,7 @@ async function collections() {
     pendingActions: db.collection(COLLECTION + "_pending_actions"),
     telRecords: db.collection(COLLECTION + "_tel_records"),
     portability: db.collection(COLLECTION + "_portability"),
-    serviceUsers: db.collection(COLLECTION + "_service_users")
+    serviceUsers: db.collection(COLLECTION + "_arem_users")
   };
 }
 
@@ -738,7 +738,7 @@ async function sendServiceGroupNotice(text) {
   return true;
 }
 
-async function handleServiceUserMessage(msg, arem) {
+async function handleServiceUserMessage(msg, serviceUser) {
   const jid = msg.key.remoteJid;
   const text =
     msg.message?.conversation ||
@@ -805,7 +805,7 @@ async function handleServiceUserMessage(msg, arem) {
       "🗑️ *SERVICIO ELIMINADO*\n" +
       "👤 " + result.service.personName + "\n" +
       "💵 " + money(result.service.amount) + "\n" +
-      "(${serviceUser?.name || serviceUser?.folio || "Usuario"})"
+      serviceUserLabel(serviceUser)
     );
     return true;
   }
@@ -883,7 +883,7 @@ async function handleServiceUserMessage(msg, arem) {
       "👤 " + parsed.name + "\n" +
       "💵 " + money(parsed.amount) + "\n\n" +
       "💰 Total: *" + money(summary.accountTotal) + "*\n" +
-      "(${serviceUser?.name || serviceUser?.folio || "Usuario"})"
+      serviceUserLabel(serviceUser)
     );
     return true;
   }
@@ -959,7 +959,7 @@ async function handleServiceUserMessage(msg, arem) {
       "💰 *PAGO REGISTRADO*\n" +
       "👤 " + result.person.name + "\n" +
       "💵 " + money(result.total) + "\n" +
-      "(${serviceUser?.name || serviceUser?.folio || "Usuario"})"
+      serviceUserLabel(serviceUser)
     );
     return true;
   }
@@ -994,7 +994,7 @@ async function handleServiceUserMessage(msg, arem) {
       "↩️ *PAGO DESHECHO*\n" +
       "👤 " + result.person.name + "\n" +
       "💵 " + money(result.total) + "\n" +
-      "(${serviceUser?.name || serviceUser?.folio || "Usuario"})"
+      serviceUserLabel(serviceUser)
     );
     return true;
   }
@@ -1058,7 +1058,7 @@ async function handleServiceUserMessage(msg, arem) {
       "🗑️ *SERVICIO ELIMINADO*\n" +
       "👤 " + result.service.personName + "\n" +
       "💵 " + money(result.service.amount) + "\n" +
-      "(${serviceUser?.name || serviceUser?.folio || "Usuario"})"
+      serviceUserLabel(serviceUser)
     );
     return true;
   }
@@ -1081,7 +1081,7 @@ async function handleServiceUserMessage(msg, arem) {
         "👤 " + parsed.name + "\n" +
         "💵 " + money(parsed.amount) + "\n\n" +
         "💰 Total: *" + money(summary.accountTotal) + "*\n" +
-        "(${serviceUser?.name || serviceUser?.folio || "Usuario"})"
+        serviceUserLabel(serviceUser)
       );
       return true;
     }
