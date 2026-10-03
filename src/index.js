@@ -2816,6 +2816,16 @@ async function handleMessage(msg) {
     }
   }
 
+  // Un usuario dado de baja no recibe ninguna respuesta salvo al intentar solicitar su reingreso.
+  if (!jid.endsWith("@g.us")) {
+    const { serviceUserBlocks } = await collections();
+    const blockedPhoneCandidates = [...ownerPhoneCandidates(jid, msg)];
+    if (blockedPhoneCandidates.length) {
+      const blocked = await serviceUserBlocks.findOne({ phone: { $in: blockedPhoneCandidates } });
+      if (blocked) return;
+    }
+  }
+
   const serviceUser = await getServiceUserByJid(jid, msg);
   if (serviceUser) {
     await handleServiceUserMessage(msg, serviceUser);
@@ -3232,8 +3242,9 @@ async function handleMessage(msg) {
     const directCommand = norm(directParts[0] || "");
 
     // Comando interno y oculto: baja definitiva del usuario de servicios.
-    if (directCommand === "bajaservicios") {
-      const rawName = directParts.slice(1).join(" ").replace(/^\\((.*)\\)$/s, "$1").trim();
+    const bajaMatch = rawDirect.match(/^bajaservicios(?:\\s+(.+)|\\((.*)\\))$/i);
+    if (bajaMatch) {
+      const rawName = String(bajaMatch[1] || bajaMatch[2] || "").trim();
       if (!rawName) return;
 
       const { serviceUsers, serviceUserBlocks } = await collections();
