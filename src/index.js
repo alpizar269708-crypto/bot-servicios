@@ -4122,9 +4122,9 @@ async function handleMessage(msg) {
       const body = users.map((x, i) => {
         const label = x.name || x.folio || "Usuario";
         return (i + 1) + ". 👤 *" + label + "*";
-      }).join("\\n");
+      }).join("\n");
 
-      await send(jid, "👥 *USUARIOS DE SERVICIOS ACTIVOS*\\n\\n" + body);
+      await send(jid, "👥 *USUARIOS DE SERVICIOS ACTIVOS*\n\n" + body);
       return;
     }
 
@@ -4153,10 +4153,10 @@ async function handleMessage(msg) {
     }
 
     const body = rows.map((x, i) =>
-      (i + 1) + ". 👤 *" + x.personName + "*\\n" +
+      (i + 1) + ". 👤 *" + x.personName + "*\n" +
       money(x.amount) +
-      (auditDate(x.createdAt) ? "\\n" + auditDate(x.createdAt) : "")
-    ).join("\\n\\n");
+      (auditDate(x.createdAt) ? "\n" + auditDate(x.createdAt) : "")
+    ).join("\n\n");
 
     const title = commandBase === "listapagados"
       ? "💵 *PAGADOS A "
@@ -4164,7 +4164,7 @@ async function handleMessage(msg) {
         ? "💰 *PAGOS REGISTRADOS POR "
         : "🧾 *SERVICIOS REGISTRADOS POR ";
 
-    await send(jid, title + (target.name || target.folio).toUpperCase() + "*\\n\\n" + body);
+    await send(jid, title + (target.name || target.folio).toUpperCase() + "*\n\n" + body);
     return;
   }
 
