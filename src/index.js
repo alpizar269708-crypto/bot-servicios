@@ -2917,7 +2917,7 @@ async function handleMessage(msg) {
     }
 
     if (pendingAction.type === "pay_select" && isPayAllText(choiceText)) {
-      const result = await payServices(pendingAction.personName, pendingAction.serviceIds || []);
+      const result = await payServices(pendingAction.personName, pendingAction.serviceIds || [], serviceUser || null);
       await clearPendingAction(jid);
       if (result.ok) {
         await send(jid, "✅ *TODOS LOS PAGOS REGISTRADOS*\n👤 " + result.person.name + "\n🧾 " + result.count + " servicios\n💵 " + money(result.total));
@@ -2951,7 +2951,7 @@ async function handleMessage(msg) {
         }
 
         if (pending.rows.length === 1) {
-          const result = await payServices(pending.person.name, [pending.rows[0]._id]);
+          const result = await payServices(pending.person.name, [pending.rows[0]._id], serviceUser || null);
           if (!result.ok) {
             await send(jid, "ℹ️ Esa deuda ya no está pendiente.");
             return;
@@ -3006,7 +3006,7 @@ async function handleMessage(msg) {
         }
 
         if (pending.rows.length === 1) {
-          const result = await payServices(pending.person.name, [pending.rows[0]._id]);
+          const result = await payServices(pending.person.name, [pending.rows[0]._id], serviceUser || null);
           if (!result.ok) {
             await send(jid, "ℹ️ Esa deuda ya no está pendiente.");
             return;
@@ -3124,7 +3124,7 @@ async function handleMessage(msg) {
       if (selected) {
         const chosen = pendingAction.rows.find(x => String(x._id) === String(selected));
 
-        const result = await payServices(pendingAction.personName, [selected]);
+        const result = await payServices(pendingAction.personName, [selected], serviceUser || null);
         await clearPendingAction(jid);
         if (result.ok) {
           await send(jid,
@@ -4202,7 +4202,7 @@ async function handleMessage(msg) {
     }
 
     if (rows.length === 1) {
-      const result = await payServices(pending.person.name, [rows[0]._id]);
+      const result = await payServices(pending.person.name, [rows[0]._id], serviceUser || null);
       if (!result.ok) {
         await send(jid, "ℹ️ Esa deuda ya no está pendiente.");
         return;
