@@ -810,21 +810,97 @@ async function sendServiceGroupNotice(text) {
   return true;
 }
 
+function compactServiceUserName(value) {
+  return norm(String(value || ""))
+    .normalize("NFD")
+    .replace(/[\\u0300-\\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function serviceUserEditDistance(a, b) {
+  a = compactServiceUserName(a);
+  b = compactServiceUserName(b);
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(
+        cur[j - 1] + 1,
+        prev[j] + 1,
+        prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+      );
+    }
+    for (let j = 0; j <= b.length; j++) prev[j] = cur[j];
+  }
+
+  return prev[b.length];
+}
+
 async function resolveServiceUserForAudit(name) {
-  const value = String(name || "").trim();
+  const value = String(name || "")
+    .trim()
+    .replace(/\\s+/g, " ");
+
   if (!value) return null;
 
   const { serviceUsers } = await collections();
-  const normalized = norm(value);
 
-  return await serviceUsers.findOne({
-    active: true,
-    $or: [
-      { name: { $regex: "^" + escapeRegex(value) + "$", $options: "i" } },
-      { folio: { $regex: "^" + escapeRegex(value) + "$", $options: "i" } },
-      { phone: value }
-    ]
-  });
+  // 1. Coincidencia exacta, ignorando mayúsculas, espacios repetidos y acentos.
+  const normalizedValue = compactServiceUserName(value);
+  const activeUsers = await serviceUsers.find({ active: true }).toArray();
+
+  let exact = activeUsers.find(x =>
+    [x.name, x.folio].some(v => compactServiceUserName(v) === normalizedValue)
+  );
+  if (exact) return exact;
+
+  // También acepta el teléfono del usuario.
+  const phone = value.replace(/\\D/g, "");
+  if (phone.length >= 10) {
+    exact = activeUsers.find(x => String(x.phone || "").replace(/\\D/g, "") === phone);
+    if (exact) return exact;
+  }
+
+  // 2. Tolerancia a errores de escritura.
+  // Ej.: "Juaan", "Juan  ", "J u a n", "BetoAlpizar" o pequeños errores de letras.
+  const scored = activeUsers
+    .map(x => {
+      const candidates = [x.name, x.folio].filter(Boolean);
+      let best = Infinity;
+
+      for (const candidate of candidates) {
+        const candidateCompact = compactServiceUserName(candidate);
+        const distance = serviceUserEditDistance(value, candidate);
+        const maxLen = Math.max(normalizedValue.length, candidateCompact.length);
+        const ratio = maxLen ? distance / maxLen : 1;
+        const prefixBonus =
+          candidateCompact.startsWith(normalizedValue) ||
+          normalizedValue.startsWith(candidateCompact)
+            ? 0.35
+            : 0;
+
+        best = Math.min(best, ratio - prefixBonus);
+      }
+
+      return { user: x, score: best };
+    })
+    .sort((a, b) => a.score - b.score);
+
+  if (!scored.length) return null;
+
+  // Para nombres cortos exigimos mucha precisión; para nombres largos
+  // permitimos algunos errores de dedo.
+  const best = scored[0];
+  const compactLength = Math.max(
+    normalizedValue.length,
+    compactServiceUserName(best.user.name || best.user.folio).length
+  );
+  const maxRatio = compactLength <= 4 ? 0 : compactLength <= 7 ? 0.25 : 0.34;
+
+  if (best.score <= maxRatio) return best.user;
+
+  return null;
 }
 
 function auditUserArg(parts) {
