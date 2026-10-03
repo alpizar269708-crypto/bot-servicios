@@ -634,7 +634,8 @@ async function collections() {
     pendingActions: db.collection(COLLECTION + "_pending_actions"),
     telRecords: db.collection(COLLECTION + "_tel_records"),
     portability: db.collection(COLLECTION + "_portability"),
-    serviceUsers: db.collection(COLLECTION + "_arem_users")
+    serviceUsers: db.collection(COLLECTION + "_arem_users"),
+    serviceUserBlocks: db.collection(COLLECTION + "_service_user_blocks")
   };
 }
 
@@ -672,6 +673,56 @@ async function isOwnerDirect(jid, msg) {
   return candidates.has(OWNER_PHONE);
 }
 
+
+function ownerPhoneCandidates(jid, msg = null) {
+  const candidates = new Set();
+  const add = value => {
+    const p = phoneFromJid(value);
+    if (p) candidates.add(p);
+  };
+  add(jid);
+  add(msg?.key?.remoteJidAlt);
+  add(msg?.key?.senderPn);
+  add(msg?.key?.participantAlt);
+  add(msg?.key?.participantPn);
+  return candidates;
+}
+
+async function isOwnerAnywhere(jid, msg = null) {
+  if (!OWNER_PHONE) return false;
+  return ownerPhoneCandidates(jid, msg).has(OWNER_PHONE);
+}
+
+async function serviceWelcomeText(folio) {
+  return (
+    "👋 *BIENVENIDO AL BOT DE SERVICIOS*\n\n" +
+    "✅ Tu acceso ha sido autorizado.\n" +
+    "👤 Usuario: *" + folio + "*\n\n" +
+    "📋 *CONSULTAR SERVICIOS*\n" +
+    "• *lista servicios*\n" +
+    "Muestra la lista de servicios y los deudores pendientes.\n\n" +
+    "➕ *REGISTRAR UN SERVICIO*\n" +
+    "• *servicio 50 Maria la del barrio*\n" +
+    "Registra un servicio a nombre de esa persona.\n\n" +
+    "💰 *REGISTRAR UN PAGO*\n" +
+    "• *pago 50 Maria la del barrio*\n" +
+    "Registra un pago de esa persona.\n" +
+    "• También puedes escribir: *50 Maria la del barrio*\n\n" +
+    "↩️ *DESHACER UN PAGO*\n" +
+    "• *deshacer pago Maria la del barrio*\n" +
+    "Deshace el último pago registrado de esa persona.\n\n" +
+    "🗑️ *ELIMINAR UN SERVICIO*\n" +
+    "• *eliminar servicio Maria la del barrio 50*\n" +
+    "Elimina el servicio indicado.\n\n" +
+    "📊 *COMANDOS DE CONTROL*\n" +
+    "• *listapagos* — pagos que tú registraste.\n" +
+    "• *listapagados* — personas que realizaron pagos que tú registraste.\n" +
+    "• *listaservicios* — servicios que tú registraste.\n\n" +
+    "💡 Escribe *menu* cuando quieras volver a ver esta guía.\n" +
+    "👤 Los nombres pueden tener hasta *4 palabras*.\n" +
+    "🔒 Este acceso no incluye totales generales, corte, transferencias ni retiros."
+  );
+}
 
 async function getServiceUserByJid(jid, msg = null) {
   if (!jid || jid.endsWith("@g.us")) return null;
@@ -855,19 +906,7 @@ async function handleServiceUserMessage(msg, serviceUser) {
   }
 
   if (first === "menu" || first === "ayuda") {
-    await send(jid,
-      "👋 *MENÚ DE SERVICIOS*\n\n" +
-      "📋 *lista servicios* — ver deudores pendientes.\n" +
-      "➕ *servicio 50 Maria la del barrio* — registrar un servicio.\n" +
-      "💰 *pago 50 Maria la del barrio* — registrar un pago.\n" +
-      "↩️ *deshacer pago Maria la del barrio* — deshacer tu último pago.\n" +
-      "🗑️ *eliminar servicio Maria la del barrio 50* — eliminar un servicio.\n" +
-      "💰 *listapagos* — ver los pagos que tú registraste.\n" +
-      "💵 *listapagados* — ver quiénes realizaron pagos que tú registraste.\\n" +
-      "🧾 *listaservicios* — ver los servicios que tú registraste.\n\n" +
-      "👤 El nombre puede tener hasta *4 palabras*.\n" +
-      "🔒 Estas consultas solo muestran tus registros; no muestran totales generales."
-    );
+    await send(jid, await serviceWelcomeText(serviceUser.name || serviceUser.folio || "Usuario"));
     return true;
   }
 
@@ -2619,6 +2658,48 @@ async function handleMessage(msg) {
 
   if (!text) return;
 
+  // Respuesta a una solicitud de reingreso de usuario de servicios.
+  if (jid.endsWith("@g.us")) {
+    const { pendingActions, serviceUsers, serviceUserBlocks } = await collections();
+    const approval = await pendingActions.findOne({ jid, type: "service_activation_approval" });
+    if (approval) {
+      const expiresAt = approval.expiresAt ? new Date(approval.expiresAt) : null;
+      if (expiresAt && Date.now() >= expiresAt.getTime()) {
+        await pendingActions.deleteOne({ _id: approval._id });
+      } else if (await isOwnerAnywhere(jid, msg)) {
+        const answer = norm(text).replace(/[^0-9]/g, "");
+        if (answer === "1" || answer === "2") {
+          await pendingActions.deleteOne({ _id: approval._id });
+
+          if (answer === "2") {
+            await send(jid, "❌ *SOLICITUD NO AUTORIZADA*\nEl acceso no fue concedido.");
+            return;
+          }
+
+          await serviceUsers.updateMany({ active: true }, { $set: { active: false, updatedAt: new Date() } });
+          await serviceUsers.updateOne(
+            { phone: approval.phone },
+            {
+              $set: {
+                phone: approval.phone,
+                name: approval.folio,
+                folio: approval.folio,
+                active: true,
+                activatedAt: new Date(),
+                updatedAt: new Date()
+              }
+            },
+            { upsert: true }
+          );
+          await serviceUserBlocks.deleteOne({ phone: approval.phone });
+          await send(jid, "✅ *ACCESO AUTORIZADO*\n👤 " + approval.folio + " ya puede utilizar los servicios.");
+          await send(approval.requestJid, "✅ *USUARIO DE SERVICIOS ACTIVADO*\n\n" + await serviceWelcomeText(approval.folio));
+          return;
+        }
+      }
+    }
+  }
+
   const quoted = quotedText(msg);
 
   // El propio usuario activa su acceso y el bot obtiene automáticamente su número de WhatsApp.
@@ -2662,13 +2743,79 @@ async function handleMessage(msg) {
         { upsert: true }
       );
 
-      await send(jid, "✅ *USUARIO DE SERVICIOS ACTIVADO*\\n\\n👤 " + folio + "\\n📱 " + phone + "\\n\\nYa puedes usar *menu* para registrar servicios y pagos.");
+      await send(jid, "✅ *USUARIO DE SERVICIOS ACTIVADO*\n\n👤 " + folio + "\n📱 " + phone + "\n\nYa puedes usar *menu* para registrar servicios y pagos.");
       return;
     }
   }
 
   // El usuario operativo trabaja exclusivamente por chat privado y con permisos limitados.
   // Su flujo se corta aquí para que jamás llegue a los comandos administrativos del bot.
+  // Alta por privado. Si el número fue dado de baja, requiere autorización en el grupo.
+  if (!jid.endsWith("@g.us")) {
+    const rawActivation = text.trim().replace(/^!/, "").trim();
+    const activationMatch = rawActivation.match(/^activarservicios(?:\\s+(.+)|\\((.*)\\))$/i);
+    if (activationMatch) {
+      const folio = String(activationMatch[1] || activationMatch[2] || "").trim();
+      if (!folio) {
+        await send(jid, "❌ Usa: *activarservicios Usuario* o *activarservicios(Usuario)*");
+        return;
+      }
+
+      const candidates = ownerPhoneCandidates(jid, msg);
+      const phone = [...candidates][0];
+      if (!phone) {
+        await send(jid, "❌ No pude identificar tu número de WhatsApp.");
+        return;
+      }
+
+      const { serviceUsers, serviceUserBlocks, activation, pendingActions } = await collections();
+      const blocked = await serviceUserBlocks.findOne({ phone });
+
+      if (blocked) {
+        const active = await activation.findOne({ _id: "active" });
+        const groupJid = active?.jid || null;
+        if (!groupJid) return;
+
+        const expiresAt = new Date(Date.now() + PENDING_ACTION_TTL_MS);
+        await pendingActions.deleteMany({ type: "service_activation_approval", phone });
+        await pendingActions.updateOne(
+          { jid: groupJid, type: "service_activation_approval" },
+          {
+            $set: {
+              jid: groupJid,
+              type: "service_activation_approval",
+              phone,
+              requestJid: jid,
+              folio,
+              createdAt: new Date(),
+              expiresAt
+            }
+          },
+          { upsert: true }
+        );
+
+        await sendServiceGroupNotice(
+          "🔐 *SOLICITUD DE ACCESO*\n\n" +
+          "👤 *" + folio + "* quiere volver a registrarse como usuario de servicios.\n\n" +
+          "¿Autorizas que pueda hacer uso de los servicios del bot?\n\n" +
+          "👉 Responde *1* para autorizar\n" +
+          "👉 Responde *2* para rechazar\n\n" +
+          "⏱️ Tienes *5 minutos* para responder."
+        );
+        return;
+      }
+
+      await serviceUsers.updateMany({ active: true }, { $set: { active: false, updatedAt: new Date() } });
+      await serviceUsers.updateOne(
+        { phone },
+        { $set: { phone, name: folio, folio, active: true, activatedAt: new Date(), updatedAt: new Date() } },
+        { upsert: true }
+      );
+      await send(jid, "✅ *USUARIO DE SERVICIOS ACTIVADO*\n\n" + await serviceWelcomeText(folio));
+      return;
+    }
+  }
+
   const serviceUser = await getServiceUserByJid(jid, msg);
   if (serviceUser) {
     await handleServiceUserMessage(msg, serviceUser);
@@ -3084,70 +3231,44 @@ async function handleMessage(msg) {
     const directParts = rawDirect.split(/\s+/).filter(Boolean);
     const directCommand = norm(directParts[0] || "");
 
-    if (directCommand === "activarservicios") {
-      const folio = directParts.slice(1).join(" ").replace(/^\\((.*)\\)$/s, "$1").trim();
-      if (!folio) {
-        await send(jid, "❌ Usa: *activarservicios Usuario* o *activarservicios(Usuario)*");
+    // Comando interno y oculto: baja definitiva del usuario de servicios.
+    if (directCommand === "bajaservicios") {
+      const rawName = directParts.slice(1).join(" ").replace(/^\\((.*)\\)$/s, "$1").trim();
+      if (!rawName) return;
+
+      const { serviceUsers, serviceUserBlocks } = await collections();
+      const target = await serviceUsers.findOne({
+        active: true,
+        $or: [
+          { name: { $regex: "^" + escapeRegex(rawName) + "$", $options: "i" } },
+          { folio: { $regex: "^" + escapeRegex(rawName) + "$", $options: "i" } },
+          { phone: rawName }
+        ]
+      });
+
+      if (!target) {
+        await send(jid, "ℹ️ No encontré un usuario de servicios activo con ese nombre.");
         return;
       }
 
-      const phoneCandidates = new Set();
-      const addPhone = value => { const p = phoneFromJid(value); if (p) phoneCandidates.add(p); };
-      addPhone(jid);
-      addPhone(msg?.key?.remoteJidAlt);
-      addPhone(msg?.key?.senderPn);
-      addPhone(msg?.key?.participantAlt);
-      addPhone(msg?.key?.participantPn);
-
-      if (jid.endsWith("@lid")) {
-        try {
-          const mapping = sock?.signalRepository?.lidMapping;
-          if (mapping?.getPNForLID) addPhone(await mapping.getPNForLID(jid));
-        } catch {}
-      }
-
-      const phone = [...phoneCandidates][0];
-      if (!phone) {
-        await send(jid, "❌ No pude identificar tu número de WhatsApp.");
-        return;
-      }
-
-      const { serviceUsers } = await collections();
-      await serviceUsers.updateMany({ active: true }, { $set: { active: false, updatedAt: new Date() } });
-      await serviceUsers.updateOne(
-        { phone },
-        { $set: { phone, name: folio, folio, active: true, activatedAt: new Date(), updatedAt: new Date() } },
+      await serviceUsers.deleteOne({ _id: target._id });
+      await serviceUserBlocks.updateOne(
+        { phone: target.phone },
+        {
+          $set: {
+            phone: target.phone,
+            name: target.name || target.folio || "Usuario",
+            blockedAt: new Date()
+          }
+        },
         { upsert: true }
       );
 
       await send(jid,
-        "✅ *USUARIO DE SERVICIOS ACTIVADO*\\n\\n" +
-        "👤 *" + folio + "*\\n" +
-        "📱 " + phone + "\\n\\n" +
-        "🎉 *BIENVENIDO AL BOT DE SERVICIOS*\\n\\n" +
-        "Tu acceso es exclusivamente para registrar y consultar servicios y pagos.\\n" +
-        "Escribe *menu* en cualquier momento para volver a ver esta guía.\\n\\n" +
-        "📋 *CONSULTAS*\\n" +
-        "• *lista servicios* — ver la lista de servicios y deudores pendientes.\\n\\n" +
-        "➕ *REGISTRAR SERVICIO*\\n" +
-        "• *servicio 50 Maria la del barrio*\\n" +
-        "Registra un servicio a nombre de la persona.\\n\\n" +
-        "💰 *REGISTRAR PAGO*\\n" +
-        "• *pago 50 Maria la del barrio*\\n" +
-        "Registra un pago y descuenta la deuda correspondiente.\\n" +
-        "También puedes escribir directamente: *50 Maria la del barrio*\\n\\n" +
-        "↩️ *DESHACER PAGO*\\n" +
-        "• *deshacer pago Maria la del barrio*\\n" +
-        "Cancela el último pago registrado de esa persona.\\n\\n" +
-        "🗑️ *ELIMINAR SERVICIO*\\n" +
-        "• *eliminar servicio Maria la del barrio 50*\\n" +
-        "Elimina el servicio indicado.\\n\\n" +
-        "📊 *CONSULTAS DE CONTROL*\\n" +
-        "• *listapagos* — ver los pagos que tú registraste.\\n" +
-        "• *listapagados* — ver quiénes realizaron pagos que tú registraste.\\n" +
-        "• *listaservicios* — ver los servicios que tú registraste.\\n\\n" +
-        "👤 El nombre puede tener hasta *4 palabras*.\\n" +
-        "🔒 Tu acceso está limitado a estas funciones y no muestra totales generales, cortes, transferencias ni retiros."
+        "🛑 *USUARIO DADO DE BAJA*\n\n" +
+        "👤 " + (target.name || target.folio || "Usuario") + "\n" +
+        "El usuario fue eliminado de la lista de accesos.\n" +
+        "Si intenta registrarse nuevamente, necesitará autorización en el grupo."
       );
       return;
     }
@@ -3840,11 +3961,11 @@ async function handleMessage(msg) {
     const body = rows.map((x, i) =>
       (i + 1) + ". 👤 *" + x.personName + "* — " + money(x.amount) +
       (auditDate(x.createdAt) ? " — " + auditDate(x.createdAt) : "")
-    ).join("\\n");
+    ).join("\n");
 
     await send(jid,
       (command === "listapagados" ? "💵 *PAGADOS A " : (isPayments ? "💰 *PAGOS REGISTRADOS POR " : "🧾 *SERVICIOS REGISTRADOS POR ")) +
-      (target.name || target.folio).toUpperCase() + "*\\n\\n" + body
+      (target.name || target.folio).toUpperCase() + "*\n\n" + body
     );
     return;
   }
