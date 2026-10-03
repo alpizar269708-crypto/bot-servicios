@@ -779,7 +779,7 @@ async function handleAremMessage(msg, arem) {
         "💰 *PAGO REGISTRADO*\n" +
         "👤 " + result.person.name + "\n" +
         "💵 " + money(result.total) + "\n" +
-        "*(Arem)*"
+        "(Arem)"
       );
       return true;
     }
@@ -800,7 +800,7 @@ async function handleAremMessage(msg, arem) {
       "🗑️ *SERVICIO ELIMINADO*\n" +
       "👤 " + result.service.personName + "\n" +
       "💵 " + money(result.service.amount) + "\n" +
-      "*(Arem)*"
+      "(Arem)"
     );
     return true;
   }
@@ -878,7 +878,7 @@ async function handleAremMessage(msg, arem) {
       "👤 " + parsed.name + "\n" +
       "💵 " + money(parsed.amount) + "\n\n" +
       "💰 Total: *" + money(summary.accountTotal) + "*\n" +
-      "*(Arem)*"
+      "(Arem)"
     );
     return true;
   }
@@ -954,7 +954,7 @@ async function handleAremMessage(msg, arem) {
       "💰 *PAGO REGISTRADO*\n" +
       "👤 " + result.person.name + "\n" +
       "💵 " + money(result.total) + "\n" +
-      "*(Arem)*"
+      "(Arem)"
     );
     return true;
   }
@@ -989,7 +989,7 @@ async function handleAremMessage(msg, arem) {
       "↩️ *PAGO DESHECHO*\n" +
       "👤 " + result.person.name + "\n" +
       "💵 " + money(result.total) + "\n" +
-      "*(Arem)*"
+      "(Arem)"
     );
     return true;
   }
@@ -1053,7 +1053,7 @@ async function handleAremMessage(msg, arem) {
       "🗑️ *SERVICIO ELIMINADO*\n" +
       "👤 " + result.service.personName + "\n" +
       "💵 " + money(result.service.amount) + "\n" +
-      "*(Arem)*"
+      "(Arem)"
     );
     return true;
   }
@@ -1076,7 +1076,7 @@ async function handleAremMessage(msg, arem) {
         "👤 " + parsed.name + "\n" +
         "💵 " + money(parsed.amount) + "\n\n" +
         "💰 Total: *" + money(summary.accountTotal) + "*\n" +
-        "*(Arem)*"
+        "(Arem)"
       );
       return true;
     }
