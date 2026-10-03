@@ -522,6 +522,17 @@ function commandOf(text) {
   if (fuzzyWord(joined, ["activarbotservicios", "activarbotaqui"], 2)) return "activar";
   if (fuzzyWord(joined, ["desactivarbotservicios", "desactivarbotaqui"], 2)) return "desactivar";
 
+  // Auditoría por número de usuario operativo:
+  // listapagos1, listapagados1, listaservicios1.
+  // Así no hace falta escribir el nombre exacto.
+  if (words.length === 1) {
+    const indexed = first.match(/^(listapagos|listapagados|listaservicios)(\\d+)$/i);
+    if (indexed) return indexed[1].toLowerCase() === "listaservicios"
+      ? "listaserviciosusuario_numero"
+      : indexed[1].toLowerCase() + "_numero";
+    if (first === "verusuarios") return "verusuarios";
+  }
+
   // Comandos simples: solo se comparan cuando no llevan argumentos.
   if (words.length === 1) {
     if (fuzzyWord(first, ["deudores", "deudor", "adeudos", "adeudo", "deudas", "deuda", "pendientes"], 2)) return "deudores";
@@ -840,7 +851,7 @@ function serviceUserEditDistance(a, b) {
 async function resolveServiceUserForAudit(name) {
   const value = String(name || "")
     .trim()
-    .replace(/\\s+/g, " ");
+    .replace(/\s+/g, " ");
 
   if (!value) return null;
 
@@ -856,7 +867,7 @@ async function resolveServiceUserForAudit(name) {
   if (exact) return exact;
 
   // También acepta el teléfono del usuario.
-  const phone = value.replace(/\\D/g, "");
+  const phone = value.replace(/\D/g, "");
   if (phone.length >= 10) {
     exact = activeUsers.find(x => String(x.phone || "").replace(/\\D/g, "") === phone);
     if (exact) return exact;
@@ -889,16 +900,22 @@ async function resolveServiceUserForAudit(name) {
 
   if (!scored.length) return null;
 
-  // Para nombres cortos exigimos mucha precisión; para nombres largos
-  // permitimos algunos errores de dedo.
+  // Tolerancia uniforme: los nombres cortos también pueden tener errores.
+  // Aceptamos al menos 1 error de carácter y, conforme crece el nombre,
+  // permitimos más errores. La coincidencia más cercana gana.
   const best = scored[0];
   const compactLength = Math.max(
     normalizedValue.length,
     compactServiceUserName(best.user.name || best.user.folio).length
   );
-  const maxRatio = compactLength <= 4 ? 0 : compactLength <= 7 ? 0.25 : 0.34;
+  const maxDistance = compactLength <= 5 ? 1 : compactLength <= 9 ? 2 : 3;
+  const bestDistance = Math.min(
+    ...[best.user.name, best.user.folio]
+      .filter(Boolean)
+      .map(candidate => serviceUserEditDistance(value, candidate))
+  );
 
-  if (best.score <= maxRatio) return best.user;
+  if (bestDistance <= maxDistance) return best.user;
 
   return null;
 }
@@ -4087,9 +4104,73 @@ async function handleMessage(msg) {
     return;
   }
 
+  if (command === "verusuarios" || command === "listapagos_numero" || command === "listapagados_numero" || command === "listaserviciosusuario_numero") {
+    if (!(await isOwnerAnywhere(jid, msg))) {
+      await send(jid, "🔒 Este comando solo está disponible para el propietario.");
+      return;
+    }
+
+    const { serviceUsers } = await collections();
+    const users = await serviceUsers.find({ active: true }).sort({ activatedAt: 1, name: 1 }).toArray();
+
+    if (command === "verusuarios") {
+      if (!users.length) {
+        await send(jid, "📭 No hay usuarios de servicios activos.");
+        return;
+      }
+
+      const body = users.map((x, i) => {
+        const label = x.name || x.folio || "Usuario";
+        return (i + 1) + ". 👤 *" + label + "*";
+      }).join("\\n");
+
+      await send(jid, "👥 *USUARIOS DE SERVICIOS ACTIVOS*\\n\\n" + body);
+      return;
+    }
+
+    const match = String(text || "").trim().replace(/^!/, "").trim().match(/^(listapagos|listapagados|listaservicios)(\\d+)$/i);
+    const index = match ? Number(match[2]) : 0;
+    const target = index > 0 ? users[index - 1] : null;
+
+    if (!target) {
+      await send(jid, "❌ No existe el usuario de servicios #" + index + ". Usa *verusuarios* para ver la lista.");
+      return;
+    }
+
+    const commandBase = match[1].toLowerCase();
+    const { payments, services } = await collections();
+    const isPayments = commandBase === "listapagos" || commandBase === "listapagados";
+    const rows = await (isPayments ? payments : services).find({
+      "recordedBy.phone": target.phone
+    }).sort({ createdAt: -1 }).toArray();
+
+    if (!rows.length) {
+      await send(jid,
+        "ℹ️ " + (target.name || target.folio) +
+        (isPayments ? " no tiene pagos registrados." : " no tiene servicios registrados.")
+      );
+      return;
+    }
+
+    const body = rows.map((x, i) =>
+      (i + 1) + ". 👤 *" + x.personName + "*\\n" +
+      money(x.amount) +
+      (auditDate(x.createdAt) ? "\\n" + auditDate(x.createdAt) : "")
+    ).join("\\n\\n");
+
+    const title = commandBase === "listapagados"
+      ? "💵 *PAGADOS A "
+      : commandBase === "listapagos"
+        ? "💰 *PAGOS REGISTRADOS POR "
+        : "🧾 *SERVICIOS REGISTRADOS POR ";
+
+    await send(jid, title + (target.name || target.folio).toUpperCase() + "*\\n\\n" + body);
+    return;
+  }
+
   if (command === "listapagos" || command === "listapagados" || command === "listaserviciosusuario") {
     const rawArgs = text.trim().replace(/^!/, "").trim();
-    let requested = rawArgs.replace(/^(listapagos|listapagados)\\s*/i, "").replace(/^listaserviciosusuario\\s*/i, "").trim();
+    let requested = rawArgs.replace(/^(listapagos|listapagados)\s*/i, "").replace(/^listaserviciosusuario\s*/i, "").trim();
     if (requested.startsWith("(") && requested.endsWith(")")) requested = requested.slice(1, -1).trim();
 
     if (!requested) {
