@@ -738,6 +738,42 @@ async function sendServiceGroupNotice(text) {
   return true;
 }
 
+async function resolveServiceUserForAudit(name) {
+  const value = String(name || "").trim();
+  if (!value) return null;
+
+  const { serviceUsers } = await collections();
+  const normalized = norm(value);
+
+  return await serviceUsers.findOne({
+    active: true,
+    $or: [
+      { name: { $regex: "^" + escapeRegex(value) + "$", $options: "i" } },
+      { folio: { $regex: "^" + escapeRegex(value) + "$", $options: "i" } },
+      { phone: value }
+    ]
+  });
+}
+
+function auditUserArg(parts) {
+  let raw = parts.slice(1).join(" ").trim();
+  if (raw.startsWith("(") && raw.endsWith(")")) raw = raw.slice(1, -1).trim();
+  return raw;
+}
+
+function auditDate(value) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString("es-MX", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
 async function handleServiceUserMessage(msg, serviceUser) {
   const jid = msg.key.remoteJid;
   const text =
@@ -767,7 +803,7 @@ async function handleServiceUserMessage(msg, serviceUser) {
     await clearPendingAction(jid);
 
     if (pending.type === "service_user_pay_select") {
-      const result = await payServices(pending.personName, [selected._id]);
+      const result = await payServices(pending.personName, [selected._id], serviceUser);
 
       if (!result.ok) {
         await send(jid, "ℹ️ Esa deuda ya no está pendiente.");
@@ -823,6 +859,63 @@ async function handleServiceUserMessage(msg, serviceUser) {
     return true;
   }
 
+  // Consultas informativas del usuario operativo. No calculan ni muestran totales globales.
+  if (first === "listapagos") {
+    const requested = auditUserArg(parts);
+    const target = requested ? await resolveServiceUserForAudit(requested) : serviceUser;
+
+    if (!target) {
+      await send(jid, "❌ No encuentro a ese usuario de servicios.");
+      return true;
+    }
+
+    const { payments } = await collections();
+    const rows = await payments.find({
+      "recordedBy.phone": target.phone
+    }).sort({ createdAt: -1 }).toArray();
+
+    if (!rows.length) {
+      await send(jid, "ℹ️ " + (target.name || target.folio) + " no tiene pagos registrados.");
+      return true;
+    }
+
+    const body = rows.map((x, i) =>
+      (i + 1) + ". 👤 *" + x.personName + "* — " + money(x.amount) +
+      (auditDate(x.createdAt) ? " — " + auditDate(x.createdAt) : "")
+    ).join("\n");
+
+    await send(jid, "💰 *PAGOS REGISTRADOS POR " + (target.name || target.folio).toUpperCase() + "*\n\n" + body);
+    return true;
+  }
+
+  if (first === "listaservicios") {
+    const requested = auditUserArg(parts);
+    const target = requested ? await resolveServiceUserForAudit(requested) : serviceUser;
+
+    if (!target) {
+      await send(jid, "❌ No encuentro a ese usuario de servicios.");
+      return true;
+    }
+
+    const { services } = await collections();
+    const rows = await services.find({
+      "recordedBy.phone": target.phone
+    }).sort({ createdAt: -1 }).toArray();
+
+    if (!rows.length) {
+      await send(jid, "ℹ️ " + (target.name || target.folio) + " no tiene servicios registrados.");
+      return true;
+    }
+
+    const body = rows.map((x, i) =>
+      (i + 1) + ". 👤 *" + x.personName + "* — " + money(x.amount) +
+      (auditDate(x.createdAt) ? " — " + auditDate(x.createdAt) : "")
+    ).join("\n");
+
+    await send(jid, "🧾 *SERVICIOS REGISTRADOS POR " + (target.name || target.folio).toUpperCase() + "*\n\n" + body);
+    return true;
+  }
+
   if (
     first === "listaservicios" ||
     (first === "lista" && norm(parts[1] || "") === "servicios") ||
@@ -863,7 +956,7 @@ async function handleServiceUserMessage(msg, serviceUser) {
       return true;
     }
 
-    const type = await addService(parsed.name, parsed.amount, jid, false);
+    const type = await addService(parsed.name, parsed.amount, jid, false, serviceUser);
     if (type !== "service") {
       await send(jid, "❌ No pude registrar el servicio.");
       return true;
@@ -1570,7 +1663,7 @@ async function person(name, jid) {
   return p;
 }
 
-async function addService(name, amount, jid, transfer) {
+async function addService(name, amount, jid, transfer, recordedBy = null) {
   const account = await ensureAccount();
   const p = await person(name, jid);
   const c = await collections();
@@ -1582,6 +1675,14 @@ async function addService(name, amount, jid, transfer) {
     amount: Number(amount),
     createdAt: new Date()
   };
+
+  if (recordedBy?.phone) {
+    doc.recordedBy = {
+      phone: recordedBy.phone,
+      name: recordedBy.name || recordedBy.folio || "Usuario",
+      folio: recordedBy.folio || recordedBy.name || "Usuario"
+    };
+  }
 
   if (transfer) {
     // Si existe un servicio pendiente de esta persona por el mismo importe,
@@ -1828,7 +1929,7 @@ async function undoTransfer(name) {
   };
 }
 
-async function payServices(name, serviceIds) {
+async function payServices(name, serviceIds, recordedBy = null) {
   const account = await ensureAccount();
   const c = await collections();
   const p = await c.people.findOne({ normalizedName: norm(name) });
@@ -1854,14 +1955,24 @@ async function payServices(name, serviceIds) {
     { $set: { status: "paid", paidAt: new Date() } }
   );
 
-  await c.payments.insertOne({
+  const paymentDoc = {
     accountNumber: account.number,
     personId: p._id,
     personName: p.name,
     amount: total,
     serviceIds: realIds,
     createdAt: new Date()
-  });
+  };
+
+  if (recordedBy?.phone) {
+    paymentDoc.recordedBy = {
+      phone: recordedBy.phone,
+      name: recordedBy.name || recordedBy.folio || "Usuario",
+      folio: recordedBy.folio || recordedBy.name || "Usuario"
+    };
+  }
+
+  await c.payments.insertOne(paymentDoc);
 
   return { ok: true, person: p, total, count: pending.length, services: pending };
 }
