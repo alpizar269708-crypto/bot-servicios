@@ -698,9 +698,11 @@ async function serviceWelcomeText(folio) {
     "👋 *BIENVENIDO AL BOT DE SERVICIOS*\n\n" +
     "✅ Tu acceso ha sido autorizado.\n" +
     "👤 Usuario: *" + folio + "*\n\n" +
-    "📋 *CONSULTAR SERVICIOS*\n" +
+    "📋 *CONSULTAR SERVICIOS Y DEUDORES*\n" +
     "• *lista servicios*\n" +
-    "Muestra la lista de servicios y los deudores pendientes.\n\n" +
+    "Muestra la lista de servicios y los deudores pendientes.\n" +
+    "• *deudores*\n" +
+    "Muestra únicamente los deudores que tienen saldo pendiente.\n\n" +
     "➕ *REGISTRAR UN SERVICIO*\n" +
     "• *servicio 50 Maria la del barrio*\n" +
     "Registra un servicio a nombre de esa persona.\n\n" +
