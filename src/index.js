@@ -626,7 +626,7 @@ async function collections() {
     pendingActions: db.collection(COLLECTION + "_pending_actions"),
     telRecords: db.collection(COLLECTION + "_tel_records"),
     portability: db.collection(COLLECTION + "_portability"),
-    aremUsers: db.collection(COLLECTION + "_arem_users")
+    serviceUsers: db.collection(COLLECTION + "_service_users")
   };
 }
 
@@ -665,7 +665,7 @@ async function isOwnerDirect(jid, msg) {
 }
 
 
-async function getAremUserByJid(jid, msg = null) {
+async function getServiceUserByJid(jid, msg = null) {
   if (!jid || jid.endsWith("@g.us")) return null;
   const candidates = new Set();
 
@@ -689,8 +689,8 @@ async function getAremUserByJid(jid, msg = null) {
 
   if (!candidates.size) return null;
 
-  const { aremUsers } = await collections();
-  const rows = await aremUsers.find({
+  const { serviceUsers } = await collections();
+  const rows = await serviceUsers.find({
     phone: { $in: [...candidates] },
     active: true
   }).limit(1).toArray();
@@ -698,7 +698,7 @@ async function getAremUserByJid(jid, msg = null) {
   return rows[0] || null;
 }
 
-function aremNameFromArgs(text) {
+function serviceUserNameFromArgs(text) {
   let t = String(text || "").trim().replace(/^!/, "").trim();
   const a = amountFrom(t);
   if (!a) return null;
@@ -711,7 +711,7 @@ function aremNameFromArgs(text) {
   return { amount: a.amount, name, words };
 }
 
-function aremCommandParts(text) {
+function serviceUserCommandParts(text) {
   return String(text || "")
     .trim()
     .replace(/^!/, "")
@@ -720,20 +720,20 @@ function aremCommandParts(text) {
     .filter(Boolean);
 }
 
-async function aremGroupJid() {
+async function serviceGroupJid() {
   const { activation } = await collections();
   const active = await activation.findOne({ _id: "active" });
   return active?.jid || null;
 }
 
-async function sendAremGroupNotice(text) {
-  const groupJid = await aremGroupJid();
+async function sendServiceGroupNotice(text) {
+  const groupJid = await serviceGroupJid();
   if (!groupJid) return false;
   await send(groupJid, text);
   return true;
 }
 
-async function handleAremMessage(msg, arem) {
+async function handleServiceUserMessage(msg, arem) {
   const jid = msg.key.remoteJid;
   const text =
     msg.message?.conversation ||
@@ -742,15 +742,15 @@ async function handleAremMessage(msg, arem) {
     msg.message?.videoMessage?.caption ||
     "";
 
-  const parts = aremCommandParts(text);
+  const parts = serviceUserCommandParts(text);
   if (!parts.length) return true;
 
   const first = norm(parts[0]);
   const joined = parts.map(norm).join(" ");
 
-  // Selecciones pendientes exclusivas de Arem.
+  // Selecciones pendientes exclusivas de Usuario.
   const pending = await getPendingAction(jid);
-  if (pending && (pending.type === "arem_pay_select" || pending.type === "arem_delete_select")) {
+  if (pending && (pending.type === "service_user_pay_select" || pending.type === "service_user_delete_select")) {
     const n = selectionNumberFromText(text.trim());
 
     if (!n || !pending.rows?.[n - 1]) {
@@ -761,7 +761,7 @@ async function handleAremMessage(msg, arem) {
     const selected = pending.rows[n - 1];
     await clearPendingAction(jid);
 
-    if (pending.type === "arem_pay_select") {
+    if (pending.type === "service_user_pay_select") {
       const result = await payServices(pending.personName, [selected._id]);
 
       if (!result.ok) {
@@ -775,11 +775,11 @@ async function handleAremMessage(msg, arem) {
         "💵 " + money(result.total)
       );
 
-      await sendAremGroupNotice(
+      await sendServiceGroupNotice(
         "💰 *PAGO REGISTRADO*\n" +
         "👤 " + result.person.name + "\n" +
         "💵 " + money(result.total) + "\n" +
-        "(Arem)"
+        "(${serviceUser?.name || serviceUser?.folio || "Usuario"})"
       );
       return true;
     }
@@ -796,11 +796,11 @@ async function handleAremMessage(msg, arem) {
       "💵 " + money(result.service.amount)
     );
 
-    await sendAremGroupNotice(
+    await sendServiceGroupNotice(
       "🗑️ *SERVICIO ELIMINADO*\n" +
       "👤 " + result.service.personName + "\n" +
       "💵 " + money(result.service.amount) + "\n" +
-      "(Arem)"
+      "(${serviceUser?.name || serviceUser?.folio || "Usuario"})"
     );
     return true;
   }
@@ -852,7 +852,7 @@ async function handleAremMessage(msg, arem) {
   }
 
   if (first === "servicio" || first === "registrarservicio") {
-    const parsed = aremNameFromArgs(parts.slice(1).join(" "));
+    const parsed = serviceUserNameFromArgs(parts.slice(1).join(" "));
     if (!parsed) {
       await send(jid, "❌ Usa: *servicio 50 Maria la del barrio*\nEl nombre puede tener hasta 4 palabras.");
       return true;
@@ -873,19 +873,19 @@ async function handleAremMessage(msg, arem) {
     const summary = await servicesSummary();
     const serviceCount = summary.rows.length;
 
-    await sendAremGroupNotice(
+    await sendServiceGroupNotice(
       "🧾 *SERVICIO " + serviceCount + "*\n" +
       "👤 " + parsed.name + "\n" +
       "💵 " + money(parsed.amount) + "\n\n" +
       "💰 Total: *" + money(summary.accountTotal) + "*\n" +
-      "(Arem)"
+      "(${serviceUser?.name || serviceUser?.folio || "Usuario"})"
     );
     return true;
   }
 
   if (first === "pago" || first === "pagar" || first === "pag") {
     const rest = parts.slice(1).join(" ");
-    const parsed = aremNameFromArgs(rest);
+    const parsed = serviceUserNameFromArgs(rest);
 
     if (!parsed) {
       await send(jid, "❌ Usa: *pago 50 Maria la del barrio*\nEl nombre puede tener hasta 4 palabras.");
@@ -924,7 +924,7 @@ async function handleAremMessage(msg, arem) {
 
     if (rows.length > 1) {
       await savePendingAction(jid, {
-        type: "arem_pay_select",
+        type: "service_user_pay_select",
         personName: matchedPerson.name,
         rows
       });
@@ -950,11 +950,11 @@ async function handleAremMessage(msg, arem) {
       "💵 " + money(result.total)
     );
 
-    await sendAremGroupNotice(
+    await sendServiceGroupNotice(
       "💰 *PAGO REGISTRADO*\n" +
       "👤 " + result.person.name + "\n" +
       "💵 " + money(result.total) + "\n" +
-      "(Arem)"
+      "(${serviceUser?.name || serviceUser?.folio || "Usuario"})"
     );
     return true;
   }
@@ -985,11 +985,11 @@ async function handleAremMessage(msg, arem) {
       "💵 " + money(result.total)
     );
 
-    await sendAremGroupNotice(
+    await sendServiceGroupNotice(
       "↩️ *PAGO DESHECHO*\n" +
       "👤 " + result.person.name + "\n" +
       "💵 " + money(result.total) + "\n" +
-      "(Arem)"
+      "(${serviceUser?.name || serviceUser?.folio || "Usuario"})"
     );
     return true;
   }
@@ -1023,7 +1023,7 @@ async function handleAremMessage(msg, arem) {
 
     if (rows.length > 1) {
       await savePendingAction(jid, {
-        type: "arem_delete_select",
+        type: "service_user_delete_select",
         personName: name,
         rows
       });
@@ -1049,18 +1049,18 @@ async function handleAremMessage(msg, arem) {
       "💵 " + money(result.service.amount)
     );
 
-    await sendAremGroupNotice(
+    await sendServiceGroupNotice(
       "🗑️ *SERVICIO ELIMINADO*\n" +
       "👤 " + result.service.personName + "\n" +
       "💵 " + money(result.service.amount) + "\n" +
-      "(Arem)"
+      "(${serviceUser?.name || serviceUser?.folio || "Usuario"})"
     );
     return true;
   }
 
   // También acepta directamente: "50 Maria la del barrio" como alta de servicio.
   if (/^\$?\d+(?:[.,]\d{1,2})?\s+/.test(text.trim())) {
-    const parsed = aremNameFromArgs(text);
+    const parsed = serviceUserNameFromArgs(text);
     if (parsed) {
       await addService(parsed.name, parsed.amount, jid, false);
 
@@ -1071,12 +1071,12 @@ async function handleAremMessage(msg, arem) {
       );
 
       const summary = await servicesSummary();
-      await sendAremGroupNotice(
+      await sendServiceGroupNotice(
         "🧾 *SERVICIO " + summary.rows.length + "*\n" +
         "👤 " + parsed.name + "\n" +
         "💵 " + money(parsed.amount) + "\n\n" +
         "💰 Total: *" + money(summary.accountTotal) + "*\n" +
-        "(Arem)"
+        "(${serviceUser?.name || serviceUser?.folio || "Usuario"})"
       );
       return true;
     }
@@ -1452,7 +1452,7 @@ async function ensureIndexes() {
   await c.telRecords.createIndex({ normalizedName: 1 });
   await c.telRecords.createIndex({ phone: 1 });
   await c.portability.createIndex({ normalizedName: 1 });
-  await c.aremUsers.createIndex({ phone: 1 }, { unique: true });
+  await c.serviceUsers.createIndex({ phone: 1 }, { unique: true });
   await c.cycles.createIndex({ accountNumber: 1 }, { unique: true });
 }
 
@@ -2482,11 +2482,58 @@ async function handleMessage(msg) {
 
   const quoted = quotedText(msg);
 
-  // Arem trabaja exclusivamente por chat privado y con permisos operativos limitados.
+  // El propio usuario activa su acceso y el bot obtiene automáticamente su número de WhatsApp.
+  if (!jid.endsWith("@g.us")) {
+    const rawActivation = text.trim().replace(/^!/, "").trim();
+    const activationParts = rawActivation.split(/\s+/).filter(Boolean);
+    const activationCommand = norm(activationParts[0] || "");
+
+    if (activationCommand === "activarservicios") {
+      const folio = activationParts.slice(1).join(" ").replace(/^\((.*)\)$/s, "$1").trim();
+      if (!folio) {
+        await send(jid, "❌ Usa: *activarservicios Usuario* o *activarservicios(Usuario)*");
+        return;
+      }
+
+      const phoneCandidates = new Set();
+      const addPhone = value => { const p = phoneFromJid(value); if (p) phoneCandidates.add(p); };
+      addPhone(jid);
+      addPhone(msg?.key?.remoteJidAlt);
+      addPhone(msg?.key?.senderPn);
+      addPhone(msg?.key?.participantAlt);
+      addPhone(msg?.key?.participantPn);
+
+      if (jid.endsWith("@lid")) {
+        try {
+          const mapping = sock?.signalRepository?.lidMapping;
+          if (mapping?.getPNForLID) addPhone(await mapping.getPNForLID(jid));
+        } catch {}
+      }
+
+      const phone = [...phoneCandidates][0];
+      if (!phone) {
+        await send(jid, "❌ No pude identificar tu número de WhatsApp.");
+        return;
+      }
+
+      const { serviceUsers } = await collections();
+      await serviceUsers.updateMany({ active: true }, { $set: { active: false, updatedAt: new Date() } });
+      await serviceUsers.updateOne(
+        { phone },
+        { $set: { phone, name: folio, folio, active: true, activatedAt: new Date(), updatedAt: new Date() } },
+        { upsert: true }
+      );
+
+      await send(jid, "✅ *USUARIO DE SERVICIOS ACTIVADO*\\n\\n👤 " + folio + "\\n📱 " + phone + "\\n\\nYa puedes usar *menu* para registrar servicios y pagos.");
+      return;
+    }
+  }
+
+  // El usuario operativo trabaja exclusivamente por chat privado y con permisos limitados.
   // Su flujo se corta aquí para que jamás llegue a los comandos administrativos del bot.
-  const arem = await getAremUserByJid(jid, msg);
+  const arem = await getServiceUserByJid(jid, msg);
   if (arem) {
-    await handleAremMessage(msg, arem);
+    await handleServiceUserMessage(msg, arem);
     return;
   }
 
@@ -2899,43 +2946,60 @@ async function handleMessage(msg) {
     const directParts = rawDirect.split(/\s+/).filter(Boolean);
     const directCommand = norm(directParts[0] || "");
 
-    if (directCommand === "activarserviciosarem") {
-      const phone = cleanPhone(directParts.slice(1).join(" "));
-
-      if (!phone || phone.length < 10) {
-        await send(jid, "❌ Usa: *activarserviciosarem 521XXXXXXXXXX*");
+    if (directCommand === "activarservicios") {
+      const folio = directParts.slice(1).join(" ").replace(/^\\((.*)\\)$/s, "$1").trim();
+      if (!folio) {
+        await send(jid, "❌ Usa: *activarservicios Usuario* o *activarservicios(Usuario)*");
         return;
       }
 
-      const { aremUsers } = await collections();
-      await aremUsers.updateMany({ active: true }, { $set: { active: false, updatedAt: new Date() } });
-      await aremUsers.updateOne(
+      const phoneCandidates = new Set();
+      const addPhone = value => { const p = phoneFromJid(value); if (p) phoneCandidates.add(p); };
+      addPhone(jid);
+      addPhone(msg?.key?.remoteJidAlt);
+      addPhone(msg?.key?.senderPn);
+      addPhone(msg?.key?.participantAlt);
+      addPhone(msg?.key?.participantPn);
+
+      if (jid.endsWith("@lid")) {
+        try {
+          const mapping = sock?.signalRepository?.lidMapping;
+          if (mapping?.getPNForLID) addPhone(await mapping.getPNForLID(jid));
+        } catch {}
+      }
+
+      const phone = [...phoneCandidates][0];
+      if (!phone) {
+        await send(jid, "❌ No pude identificar tu número de WhatsApp.");
+        return;
+      }
+
+      const { serviceUsers } = await collections();
+      await serviceUsers.updateMany({ active: true }, { $set: { active: false, updatedAt: new Date() } });
+      await serviceUsers.updateOne(
         { phone },
-        {
-          $set: {
-            phone,
-            name: "Arem",
-            active: true,
-            activatedAt: new Date(),
-            updatedAt: new Date()
-          }
-        },
+        { $set: { phone, name: folio, folio, active: true, activatedAt: new Date(), updatedAt: new Date() } },
         { upsert: true }
       );
 
       await send(jid,
-        "✅ *AREM ACTIVADO*\n\n" +
-        "📱 " + phone + "\n" +
-        "👤 Arem\n\n" +
-        "Puede escribirle directamente al número del bot para usar sus funciones de servicios."
+        "✅ *USUARIO DE SERVICIOS ACTIVADO*\\n\\n" +
+        "👤 " + folio + "\\n" +
+        "📱 " + phone + "\\n\\n" +
+        "Ya puedes usar *menu* para registrar servicios y pagos."
       );
       return;
     }
 
-    if (directCommand === "desactivarserviciosarem") {
-      const { aremUsers } = await collections();
-      await aremUsers.updateMany({ active: true }, { $set: { active: false, updatedAt: new Date() } });
-      await send(jid, "✅ *AREM DESACTIVADO*");
+    if (directCommand === "desactivarservicios") {
+      const { serviceUsers } = await collections();
+      const current = await getServiceUserByJid(jid, msg);
+      if (!current) {
+        await send(jid, "ℹ️ No tienes un usuario de servicios activo.");
+        return;
+      }
+      await serviceUsers.updateOne({ _id: current._id }, { $set: { active: false, updatedAt: new Date() } });
+      await send(jid, "✅ *USUARIO DE SERVICIOS DESACTIVADO*");
       return;
     }
 
