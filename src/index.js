@@ -2819,10 +2819,12 @@ async function handleMessage(msg) {
   }
 
   const serviceUser = await getServiceUserByJid(jid, msg);
-  if (serviceUser) {
-    await handleServiceUserMessage(msg, serviceUser);
-    return;
-  }
+
+  // El usuario de servicios usa el mismo flujo y comandos del bot principal.
+  // Sus únicas restricciones son:
+  // 1) no puede ejecutar CORTE;
+  // 2) CUENTA NUEVA no muestra los importes de la cuenta anterior.
+  // Todo lo demás funciona igual que para el bot principal.
 
   // Si se responde a un PAGO REGISTRADO y se escribe "error" o una
   // variante con faltas, se deshace ese pago y el servicio vuelve a pendiente.
@@ -2832,6 +2834,39 @@ async function handleMessage(msg) {
   const pendingAction = await getPendingAction(jid);
   if (pendingAction && !isAdjustListText(text) && !/PAGO\s+REGISTRADO/i.test(quoted || "") && text.trim()) {
     const choiceText = text.trim();
+
+    if (pendingAction.type === "service_user_debt_select") {
+      const selectedNumber = selectionNumberFromText(choiceText);
+      const selected = selectedNumber ? pendingAction.rows?.[selectedNumber - 1] : null;
+
+      if (!selected) {
+        await send(jid, "❌ Ese número no existe en la lista de deudores.");
+        return;
+      }
+
+      await clearPendingAction(jid);
+
+      const result = await payServices(selected.name, selected.serviceIds || [], serviceUser);
+      if (!result.ok) {
+        await send(jid, "ℹ️ *" + selected.name + "* ya no tiene servicios pendientes.");
+        return;
+      }
+
+      await send(jid,
+        "✅ *PAGO REGISTRADO*\n" +
+        "👤 " + result.person.name + "\n" +
+        "💵 " + money(result.total) +
+        (result.count > 1 ? "\n🧾 " + result.count + " servicios" : "")
+      );
+
+      await sendServiceGroupNotice(
+        "💰 *PAGO REGISTRADO*\n" +
+        "👤 " + result.person.name + "\n" +
+        "💵 " + money(result.total) + "\n" +
+        serviceUserLabel(serviceUser)
+      );
+      return;
+    }
 
     if (pendingAction.type === "transfer_select" && isPayAllText(choiceText)) {
       const result = await transferServices(
@@ -3527,7 +3562,7 @@ async function handleMessage(msg) {
 
   // El bot solo funciona en el único grupo que fue activado.
   // Fuera de ese grupo no responde a ningún comando ni registra datos.
-  if (!(await isActivatedChat(jid))) return;
+  if (!(await isActivatedChat(jid)) && !serviceUser) return;
 
   if (command === "cancelar") {
     const pending = await getPendingAction(jid);
@@ -3666,8 +3701,20 @@ async function handleMessage(msg) {
 
     await send(jid,
       "👥 *DEUDORES*\n\n" + body +
-      "\n\n💰 Total pendiente: *" + money(total) + "*"
+      "\n\n💰 Total pendiente: *" + money(total) +
+      (serviceUser ? "\n\n👉 Escribe el número de un deudor (por ejemplo *10*) para registrar su pago." : "")
     );
+
+    if (serviceUser) {
+      await savePendingAction(jid, {
+        type: "service_user_debt_select",
+        rows: [...grouped.values()].map(g => ({
+          name: g.name,
+          total: g.total,
+          serviceIds: g.rows.map(x => x._id)
+        }))
+      });
+    }
     return;
   }
 
@@ -4403,21 +4450,28 @@ async function handleMessage(msg) {
     await send(jid,
       "🆕 *CUENTA*\n" +
       "💵 Inicio: *" + money(account.initialAmount) + "*\n" +
-      (ps
-        ? "\n📌 *CUENTA ANTERIOR*\n" +
-          "🧾 Servicios: " + ps.count + "\n" +
-          "💰 Suma: " + money(ps.total) + "\n" +
-          "🔄 Transferencias: " + money(ps.transfers || 0) + "\n" +
-          "💸 Retiros: " + money(ps.withdrawals) + "\n" +
-          "📊 Final: " + money(ps.netTotal) + "\n" +
-          "⏳ Pendiente: " + money(ps.pending) + "\n" +
-          "✅ Pagado: " + money(ps.paid)
-        : "\n📌 Sin cuenta anterior.")
+      (serviceUser
+        ? "\n📌 Cuenta nueva creada correctamente."
+        : (ps
+          ? "\n📌 *CUENTA ANTERIOR*\n" +
+            "🧾 Servicios: " + ps.count + "\n" +
+            "💰 Suma: " + money(ps.total) + "\n" +
+            "🔄 Transferencias: " + money(ps.transfers || 0) + "\n" +
+            "💸 Retiros: " + money(ps.withdrawals) + "\n" +
+            "📊 Final: " + money(ps.netTotal) + "\n" +
+            "⏳ Pendiente: " + money(ps.pending) + "\n" +
+            "✅ Pagado: " + money(ps.paid)
+          : "\n📌 Sin cuenta anterior."))
     );
     return;
   }
 
   if (command === "corte") {
+    if (serviceUser) {
+      await send(jid, "🔒 Este acceso no tiene disponible el comando *corte*.");
+      return;
+    }
+
     // El corte envía exactamente 3 mensajes y en este orden:
     // 1) lista de servicios
     // 2) lista de deudores
