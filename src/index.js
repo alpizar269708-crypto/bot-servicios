@@ -1219,7 +1219,7 @@ async function handleServiceUserMessage(msg, serviceUser) {
   if (/^\$?\d+(?:[.,]\d{1,2})?\s+/.test(text.trim())) {
     const parsed = serviceUserNameFromArgs(text);
     if (parsed) {
-      await addService(parsed.name, parsed.amount, jid, false);
+      await addService(parsed.name, parsed.amount, jid, false, serviceUser);
 
       await send(jid,
         "✅ *Servicio registrado*\n\n" +
@@ -2707,7 +2707,7 @@ async function handleMessage(msg) {
   // Alta por privado. Si el número fue dado de baja, requiere autorización en el grupo.
   if (!jid.endsWith("@g.us")) {
     const rawActivation = text.trim().replace(/^!/, "").trim();
-    const activationMatch = rawActivation.match(/^activarservicios(?:\\s+(.+)|\\((.*)\\))$/i);
+    const activationMatch = rawActivation.match(/^activarservicios(?:\s+(.+)|\((.*)\))$/i);
     if (activationMatch) {
       const folio = String(activationMatch[1] || activationMatch[2] || "").trim();
       if (!folio) {
@@ -2784,7 +2784,7 @@ async function handleMessage(msg) {
   // Así el propietario puede administrar bajas aunque también tenga acceso operativo.
   if (await isOwnerDirect(jid, msg) && !jid.endsWith("@g.us")) {
     const rawDirectOwner = text.trim().replace(/^!/, "").trim();
-    const bajaOwnerMatch = rawDirectOwner.match(/^bajaservicios(?:\\s+(.+)|\\((.*)\\))$/i);
+    const bajaOwnerMatch = rawDirectOwner.match(/^bajaservicios(?:\s+(.+)|\((.*)\))$/i);
     if (bajaOwnerMatch) {
       const rawName = String(bajaOwnerMatch[1] || bajaOwnerMatch[2] || "").trim();
       if (!rawName) return;
