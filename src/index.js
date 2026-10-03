@@ -2490,11 +2490,10 @@ async function handleMessage(msg) {
   // El propio usuario activa su acceso y el bot obtiene automáticamente su número de WhatsApp.
   if (!jid.endsWith("@g.us")) {
     const rawActivation = text.trim().replace(/^!/, "").trim();
-    const activationParts = rawActivation.split(/\s+/).filter(Boolean);
-    const activationCommand = norm(activationParts[0] || "");
+    const activationMatch = rawActivation.match(/^activarservicios(?:\s+(.+)|\((.*)\))$/i);
 
-    if (activationCommand === "activarservicios") {
-      const folio = activationParts.slice(1).join(" ").replace(/^\((.*)\)$/s, "$1").trim();
+    if (activationMatch) {
+      const folio = String(activationMatch[1] || activationMatch[2] || "").trim();
       if (!folio) {
         await send(jid, "❌ Usa: *activarservicios Usuario* o *activarservicios(Usuario)*");
         return;
