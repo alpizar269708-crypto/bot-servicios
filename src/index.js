@@ -540,10 +540,10 @@ function commandOf(text) {
   if (fuzzyWord(first, ["deudoresp"], 1)) return "deudoresp";
 
   // Auditoría por usuario operativo: listapagos(usuario), listapagados(usuario) y listaservicios(usuario).
-  if (/^(listapagos|listapagados)\\s*\\(.+\\)$/i.test(joined) || /^(listapagos|listapagados)\\s+.+$/i.test(joined)) {
+  if (/^(listapagos|listapagados)\s*\(.+\)$/i.test(joined) || /^(listapagos|listapagados)\s+.+$/i.test(joined)) {
     return first === "listapagados" ? "listapagados" : "listapagos";
   }
-  if (/^listaservicios\\s*\\(.+\\)$/i.test(joined) || /^listaservicios\\s+.+$/i.test(joined)) {
+  if (/^listaservicios\s*\(.+\)$/i.test(joined) || /^listaservicios\s+.+$/i.test(joined)) {
     return "listaserviciosusuario";
   }
 
