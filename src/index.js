@@ -876,7 +876,8 @@ async function handleAremMessage(msg, arem) {
     await sendAremGroupNotice(
       "🧾 *SERVICIO " + serviceCount + "*\n" +
       "👤 " + parsed.name + "\n" +
-      "💵 " + money(parsed.amount) + "\n" +
+      "💵 " + money(parsed.amount) + "\n\n" +
+      "💰 Total: *" + money(summary.accountTotal) + "*\n" +
       "*(Arem)*"
     );
     return true;
@@ -1073,7 +1074,8 @@ async function handleAremMessage(msg, arem) {
       await sendAremGroupNotice(
         "🧾 *SERVICIO " + summary.rows.length + "*\n" +
         "👤 " + parsed.name + "\n" +
-        "💵 " + money(parsed.amount) + "\n" +
+        "💵 " + money(parsed.amount) + "\n\n" +
+        "💰 Total: *" + money(summary.accountTotal) + "*\n" +
         "*(Arem)*"
       );
       return true;
