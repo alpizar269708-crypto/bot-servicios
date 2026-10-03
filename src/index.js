@@ -3761,6 +3761,48 @@ async function handleMessage(msg) {
     return;
   }
 
+  if (command === "listapagos" || command === "listaserviciosusuario") {
+    const rawArgs = text.trim().replace(/^!/, "").trim();
+    let requested = rawArgs.replace(/^listapagos\\s*/i, "").replace(/^listaserviciosusuario\\s*/i, "").trim();
+    if (requested.startsWith("(") && requested.endsWith(")")) requested = requested.slice(1, -1).trim();
+
+    if (!requested) {
+      await send(jid, "❌ En el grupo usa: *" + command + "(Usuario)*");
+      return;
+    }
+
+    const target = await resolveServiceUserForAudit(requested);
+    if (!target) {
+      await send(jid, "❌ No encuentro a ese usuario de servicios.");
+      return;
+    }
+
+    const { payments, services } = await collections();
+    const isPayments = command === "listapagos";
+    const rows = await (isPayments ? payments : services).find({
+      "recordedBy.phone": target.phone
+    }).sort({ createdAt: -1 }).toArray();
+
+    if (!rows.length) {
+      await send(jid,
+        "ℹ️ " + (target.name || target.folio) +
+        (isPayments ? " no tiene pagos registrados." : " no tiene servicios registrados.")
+      );
+      return;
+    }
+
+    const body = rows.map((x, i) =>
+      (i + 1) + ". 👤 *" + x.personName + "* — " + money(x.amount) +
+      (auditDate(x.createdAt) ? " — " + auditDate(x.createdAt) : "")
+    ).join("\\n");
+
+    await send(jid,
+      (isPayments ? "💰 *PAGOS REGISTRADOS POR " : "🧾 *SERVICIOS REGISTRADOS POR ") +
+      (target.name || target.folio).toUpperCase() + "*\\n\\n" + body
+    );
+    return;
+  }
+
   if (command === "total") {
     const s = await servicesSummary();
     await send(jid, money(s.accountTotal));
