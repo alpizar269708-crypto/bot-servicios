@@ -3856,8 +3856,10 @@ async function handleMessage(msg) {
             return (i + 1) + ". 🔄 " + x.personName + " — " + money(x.amount) + " *TRANSFERENCIA*";
           }
 
+          const registeredBy = x.recordedBy?.name || x.recordedBy?.folio;
+          const marker = registeredBy ? " (" + registeredBy + ")" : "";
           return (i + 1) + ". " + x.personName + " — " + money(x.amount) +
-            (x.status === "paid" ? " ✅" : " ⏳");
+            (x.status === "paid" ? " ✅" : " ⏳") + marker;
         }).join("\n")
       : "No hay servicios registrados.";
 
