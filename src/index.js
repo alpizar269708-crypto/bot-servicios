@@ -980,9 +980,10 @@ async function handleServiceUserMessage(msg, serviceUser) {
     }
 
     const body = rows.map((x, i) =>
-      (i + 1) + ". 👤 *" + x.personName + "* — " + money(x.amount) +
-      (auditDate(x.createdAt) ? " — " + auditDate(x.createdAt) : "")
-    ).join("\n");
+      (i + 1) + ". 👤 *" + x.personName + "*\n" +
+      money(x.amount) +
+      (auditDate(x.createdAt) ? "\n" + auditDate(x.createdAt) : "")
+    ).join("\n\n");
 
     await send(jid, "🧾 *SERVICIOS REGISTRADOS POR " + (target.name || target.folio).toUpperCase() + "*\n\n" + body);
     return true;
