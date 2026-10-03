@@ -863,6 +863,7 @@ async function handleServiceUserMessage(msg, serviceUser) {
       "↩️ *deshacer pago Maria la del barrio* — deshacer tu último pago.\n" +
       "🗑️ *eliminar servicio Maria la del barrio 50* — eliminar un servicio.\n" +
       "💰 *listapagos* — ver los pagos que tú registraste.\n" +
+      "💵 *listapagados* — ver quiénes realizaron pagos que tú registraste.\\n" +
       "🧾 *listaservicios* — ver los servicios que tú registraste.\n\n" +
       "👤 El nombre puede tener hasta *4 palabras*.\n" +
       "🔒 Estas consultas solo muestran tus registros; no muestran totales generales."
@@ -3121,9 +3122,32 @@ async function handleMessage(msg) {
 
       await send(jid,
         "✅ *USUARIO DE SERVICIOS ACTIVADO*\\n\\n" +
-        "👤 " + folio + "\\n" +
+        "👤 *" + folio + "*\\n" +
         "📱 " + phone + "\\n\\n" +
-        "Ya puedes usar *menu* para registrar servicios y pagos."
+        "🎉 *BIENVENIDO AL BOT DE SERVICIOS*\\n\\n" +
+        "Tu acceso es exclusivamente para registrar y consultar servicios y pagos.\\n" +
+        "Escribe *menu* en cualquier momento para volver a ver esta guía.\\n\\n" +
+        "📋 *CONSULTAS*\\n" +
+        "• *lista servicios* — ver la lista de servicios y deudores pendientes.\\n\\n" +
+        "➕ *REGISTRAR SERVICIO*\\n" +
+        "• *servicio 50 Maria la del barrio*\\n" +
+        "Registra un servicio a nombre de la persona.\\n\\n" +
+        "💰 *REGISTRAR PAGO*\\n" +
+        "• *pago 50 Maria la del barrio*\\n" +
+        "Registra un pago y descuenta la deuda correspondiente.\\n" +
+        "También puedes escribir directamente: *50 Maria la del barrio*\\n\\n" +
+        "↩️ *DESHACER PAGO*\\n" +
+        "• *deshacer pago Maria la del barrio*\\n" +
+        "Cancela el último pago registrado de esa persona.\\n\\n" +
+        "🗑️ *ELIMINAR SERVICIO*\\n" +
+        "• *eliminar servicio Maria la del barrio 50*\\n" +
+        "Elimina el servicio indicado.\\n\\n" +
+        "📊 *CONSULTAS DE CONTROL*\\n" +
+        "• *listapagos* — ver los pagos que tú registraste.\\n" +
+        "• *listapagados* — ver quiénes realizaron pagos que tú registraste.\\n" +
+        "• *listaservicios* — ver los servicios que tú registraste.\\n\\n" +
+        "👤 El nombre puede tener hasta *4 palabras*.\\n" +
+        "🔒 Tu acceso está limitado a estas funciones y no muestra totales generales, cortes, transferencias ni retiros."
       );
       return;
     }
