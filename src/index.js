@@ -698,30 +698,54 @@ async function serviceWelcomeText(folio) {
     "👋 *BIENVENIDO AL BOT DE SERVICIOS*\n\n" +
     "✅ Tu acceso ha sido autorizado.\n" +
     "👤 Usuario: *" + folio + "*\n\n" +
-    "📋 *CONSULTAR SERVICIOS Y DEUDORES*\n" +
-    "• *lista servicios*\n" +
-    "Muestra la lista de servicios y los deudores pendientes.\n" +
-    "• *deudores*\n" +
-    "Muestra únicamente los deudores que tienen saldo pendiente.\n\n" +
-    "➕ *REGISTRAR UN SERVICIO*\n" +
-    "• *servicio 50 Maria la del barrio*\n" +
-    "Registra un servicio a nombre de esa persona.\n\n" +
-    "💰 *REGISTRAR UN PAGO*\n" +
+
+    "📋 *CONSULTAS*\n" +
+    "• *deudores* — muestra los deudores pendientes.\n" +
+    "• *lista servicios* — muestra la lista de servicios.\n" +
+    "• *pagados* — muestra los pagos del ciclo.\n" +
+    "• *total* — muestra el total disponible.\n" +
+    "• *listapagos(Usuario)* — auditoría de pagos registrados por un usuario.\n" +
+    "• *listapagados(Usuario)* — personas que pagaron a un usuario.\n" +
+    "• *listaservicios(Usuario)* — servicios registrados por un usuario.\n\n" +
+
+    "💵 *PAGOS*\n" +
     "• *pago 50 Maria la del barrio*\n" +
-    "Registra un pago de esa persona.\n" +
-    "• También puedes escribir: *50 Maria la del barrio*\n\n" +
-    "↩️ *DESHACER UN PAGO*\n" +
-    "• *deshacer pago Maria la del barrio*\n" +
-    "Deshace el último pago registrado de esa persona.\n\n" +
-    "🗑️ *ELIMINAR UN SERVICIO*\n" +
+    "• *50 Maria la del barrio*\n" +
+    "• *deudoresp 1 3 9* o *deudoresp 1-5*\n" +
+    "• Después de *deudores*, también puedes escribir solo el número, por ejemplo *10*, para pagar al deudor #10.\n" +
+    "• *todopagado* — marca todos los deudores como pagados.\n" +
+    "• *deshacer pago Maria* — deshace el último pago.\n" +
+    "• *errorpago* — corrige un pago respondiendo a su mensaje.\n\n" +
+
+    "🔄 *TRANSFERENCIAS*\n" +
+    "• *transferencia Maria 50*\n" +
+    "• *2 transferencia* — transfiere al deudor #2.\n" +
+    "• *deshacer transferencia Maria* — deshace la última transferencia.\n\n" +
+
+    "💸 *RETIROS*\n" +
+    "• *retiro 5000*\n\n" +
+
+    "➕ *SERVICIOS*\n" +
+    "• *servicio 50 Maria la del barrio*\n" +
     "• *eliminar servicio Maria la del barrio 50*\n" +
-    "Elimina el servicio indicado.\n\n" +
-    "📊 *COMANDOS DE CONTROL*\n" +
-    "• *listapagos* — pagos que tú registraste.\n" +
-    "• *listapagados* — personas que realizaron pagos que tú registraste.\n" +
-    "• *listaservicios* — servicios que tú registraste.\n\n" +
-    "💡 Escribe *menu* cuando quieras volver a ver esta guía.\n" +
-    ""
+    "• *eliminar* — también puede usarse respondiendo a un servicio.\n\n" +
+
+    "🆕 *CUENTA NUEVA*\n" +
+    "• *cuenta nueva 50000* — crea una cuenta nueva.\n" +
+    "ℹ️ Por este acceso no se muestran las cantidades de la cuenta anterior.\n\n" +
+
+    "🛠️ *AJUSTES Y AYUDA*\n" +
+    "• *ajustelista*\n" +
+    "• *ajustetransferenciacaja Rosy 300*\n" +
+    "• *cancelar* — cancela una selección pendiente.\n" +
+    "• *menu* / *ayuda*\n" +
+    "• *menuextra* — ayuda avanzada.\n" +
+    "• *menusecreto* — comandos adicionales.\n\n" +
+
+    "🔒 *ÚNICA RESTRICCIÓN*\n" +
+    "• *corte* no está disponible para este acceso.\n\n" +
+
+    "💡 El resto de funciones del bot funciona igual que para un usuario normal."
   );
 }
 
