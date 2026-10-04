@@ -1329,9 +1329,17 @@ async function handleServiceUserMessage(msg, serviceUser) {
       g.rows.push(x);
     }
 
-    const body = [...grouped.values()].map((g, i) =>
-      (i + 1) + ". 👤 *" + g.name + "* — " + money(g.total)
-    ).join("\n");
+    const body = [...grouped.values()].map((g, i) => {
+      const details = g.rows.map(x =>
+        "💵 " + money(x.amount) + "\n" +
+        "📅 " + new Date(x.createdAt).toLocaleDateString("es-MX", {
+          timeZone: "America/Mexico_City",
+          dateStyle: "short"
+        })
+      ).join("\n");
+
+      return (i + 1) + ". 👤 *" + g.name + "*\n" + details;
+    }).join("\n\n");
 
     await send(jid, "👥 *DEUDORES*\n\n" + body);
     return true;
@@ -4035,13 +4043,14 @@ async function handleMessage(msg) {
     const body = [...grouped.values()].map((g, i) => {
       total += g.total;
       const details = g.rows.map(x =>
-        "   💵 " + money(x.amount) + "   📅 " + new Date(x.createdAt).toLocaleDateString("es-MX", {
+        "💵 " + money(x.amount) + "\n" +
+        "📅 " + new Date(x.createdAt).toLocaleDateString("es-MX", {
           timeZone: "America/Mexico_City",
           dateStyle: "short"
         })
       ).join("\n");
 
-      return (i + 1) + ". 👤 *" + g.name + "* — " + money(g.total) + "\n" + details;
+      return (i + 1) + ". 👤 *" + g.name + "*\n" + details;
     }).join("\n\n");
 
     await send(jid,
@@ -4085,9 +4094,9 @@ async function handleMessage(msg) {
     const rows = await debtors();
     const body = rows.length
       ? rows.map((x, i) =>
-          (i + 1) + ". 👤 " + x.name + " — " + money(x.total) +
-          "\n   💵 " + money(x.total) + "   📅 " +
-          new Date().toLocaleDateString("es-MX", {
+          (i + 1) + ". 👤 " + x.name +
+          "\n💵 " + money(x.total) +
+          "\n📅 " + new Date().toLocaleDateString("es-MX", {
             day: "2-digit",
             month: "2-digit",
             year: "2-digit"
@@ -4122,7 +4131,7 @@ async function handleMessage(msg) {
       const quotedLines = quoted.split(/\r?\n/);
 
       const selectedLine = quotedLines.find(line => {
-        const m = line.match(/^\s*(\d+)\.\s*👤\s*\*?(.+?)\*?\s*[—-]/);
+        const m = line.match(/^\s*(\d+)\.\s*👤\s*\*?(.+?)\*?(?:\s*[—-].*)?\s*$/);
         return m && Number(m[1]) === selectedNumber;
       });
 
@@ -4131,7 +4140,7 @@ async function handleMessage(msg) {
         return;
       }
 
-      const match = selectedLine.match(/^\s*(\d+)\.\s*👤\s*\*?(.+?)\*?\s*[—-]/);
+      const match = selectedLine.match(/^\s*(\d+)\.\s*👤\s*\*?(.+?)\*?(?:\s*[—-].*)?\s*$/);
       const selectedName = match
         ? match[2].replace(/[*_]/g, "").trim()
         : "";
