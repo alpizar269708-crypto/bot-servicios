@@ -514,6 +514,19 @@ function commandOf(text) {
   const first = words[0];
   const joined = words.join(" ");
 
+  // Teléfonos: reconocer el comando por prefijo antes de cualquier otro
+  // comando/fuzzy matching. Así "vertel Leo", "vertel leo" y similares
+  // siempre llegan al buscador de usuarios.
+  if (/^(?:vertel|vertelefonos|telefonos|telefonosservicios)$/i.test(first)) {
+    return words.length > 1 ? "vertel_busqueda" : "vertel";
+  }
+  if (/^(?:modtel|modnombre|cambiarnombre|modificartelefono)$/i.test(first)) {
+    return "modtel";
+  }
+  if (/^(?:menutel|menutelefono|menutelefonos)$/i.test(first)) {
+    return "menutel";
+  }
+
   // Deshacer movimientos: el comando va primero y el nombre después.
   // Formas aceptadas:
   //   deshacer pago Lali
