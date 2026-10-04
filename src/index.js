@@ -57,7 +57,7 @@ const mongoose = require("mongoose");
 
 const MONGO_URI = process.env.MONGO_URI;
 const DB_NAME = process.env.MONGO_DB_NAME || "bot_servicios";
-const OWNER_PHONE = cleanPhone(process.env.OWNER_PHONE);
+const OWNER_PHONE = normalizeMxPhone(process.env.OWNER_PHONE);
 const PREFIX = process.env.COMMAND_PREFIX || "!";
 const COLLECTION = process.env.COLLECTION_NAME || "bot_servicios";
 
@@ -302,28 +302,25 @@ async function cleanupServiceUserAudit(options = {}) {
 }
 
 
+function normalizeMxPhone(v) {
+  const digits = cleanPhone(v);
+  if (digits.length === 10) return digits;
+  if (digits.length === 12 && digits.startsWith("52")) return digits.slice(2);
+  if (digits.length === 13 && digits.startsWith("521")) return digits.slice(3);
+  return "";
+}
+
 function phoneFromJid(jid) {
   const raw = String(jid || "").trim();
-  if (!raw) return "";
-
-  // WhatsApp puede entregar números normales, JID @s.whatsapp.net,
-  // LID y JID con ":device". Primero quitamos el tipo de JID.
-  let value = raw.split("@")[0].split(":")[0];
-
-  // Si llega como JID LID, el número real se obtiene por los campos
-  // alternativos del mensaje; aquí no inventamos un teléfono.
-  return cleanPhone(value);
+  if (!raw || raw.endsWith("@lid")) return "";
+  const value = raw.split("@")[0].split(":")[0];
+  return normalizeMxPhone(value);
 }
 
 function formatTel(phone) {
-  const digits = cleanPhone(phone);
-  if (digits.length === 12 && digits.startsWith("52")) {
-    return digits.slice(2, 5) + " " + digits.slice(5, 8) + " " + digits.slice(8);
-  }
-  if (digits.length === 10) {
-    return digits.slice(0, 3) + " " + digits.slice(3, 6) + " " + digits.slice(6);
-  }
-  return digits;
+  const digits = normalizeMxPhone(phone);
+  if (digits.length !== 10) return digits;
+  return digits.slice(0, 3) + " " + digits.slice(3, 6) + " " + digits.slice(6);
 }
 
 function money(n) {
@@ -723,7 +720,7 @@ async function isOwnerDirect(jid, msg) {
     }
   }
 
-  return candidates.has(OWNER_PHONE);
+  return [...candidates].some(phone => normalizeMxPhone(phone) === OWNER_PHONE);
 }
 
 
@@ -743,7 +740,7 @@ function ownerPhoneCandidates(jid, msg = null) {
 
 async function isOwnerAnywhere(jid, msg = null) {
   if (!OWNER_PHONE) return false;
-  return ownerPhoneCandidates(jid, msg).has(OWNER_PHONE);
+  return [...ownerPhoneCandidates(jid, msg)].some(phone => normalizeMxPhone(phone) === OWNER_PHONE);
 }
 
 async function serviceWelcomeText(folio) {
@@ -815,21 +812,13 @@ async function getServiceUserByJid(jid, msg = null) {
   if (!candidates.size) return null;
 
   const { serviceUsers } = await collections();
-  const candidateVariants = new Set();
-  for (const phone of candidates) {
-    const p = cleanPhone(phone);
-    if (!p) continue;
-    candidateVariants.add(p);
-    if (p.length === 12 && p.startsWith("52")) candidateVariants.add(p.slice(2));
-    if (p.length === 10) candidateVariants.add("52" + p);
-  }
+  const normalizedCandidates = [...candidates]
+    .map(normalizeMxPhone)
+    .filter(Boolean);
 
   const rows = await serviceUsers.find({
     active: true,
-    $or: [
-      { phone: { $in: [...candidateVariants] } },
-      { phone: { $in: [...candidates] } }
-    ]
+    phone: { $in: normalizedCandidates }
   }).limit(1).toArray();
 
   return rows[0] || null;
