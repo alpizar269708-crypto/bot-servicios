@@ -5132,15 +5132,14 @@ async function handleMessage(msg) {
         debtorTotal += g.total;
 
         const details = g.rows.map(x =>
-          "   💵 " + money(x.amount) + "   📅 " +
-          new Date(x.createdAt).toLocaleDateString("es-MX", {
+          "💵 " + money(x.amount) + "   \n" +
+          "📅 " + new Date(x.createdAt).toLocaleDateString("es-MX", {
             timeZone: "America/Mexico_City",
             dateStyle: "short"
           })
         ).join("\n");
 
-        return (i + 1) + ". 👤 *" + g.name + "* — " + money(g.total) +
-          "\n" + details;
+        return (i + 1) + ". 👤 *" + g.name + "*\n" + details;
       }).join("\n\n");
 
       await send(jid,
