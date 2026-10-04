@@ -1648,11 +1648,11 @@ async function findTelRecords(query) {
 
   if (!nq) return [];
 
+  // Buscar por CONTENIDO, no solo por coincidencia exacta o por el inicio.
+  // Así "vertel leo" encuentra "Leo", "Leonardo", "Leo-Karla", "Juan-Leo", etc.
+  // También funciona con acentos porque normalizedName ya está normalizado.
   return telRecords.find({
-    $or: [
-      { normalizedName: nq },
-      { normalizedName: { $regex: "^" + escapeRegex(nq) + "\\s" } }
-    ]
+    normalizedName: { $regex: escapeRegex(nq) }
   }).sort({ createdAt: 1 }).toArray();
 }
 
