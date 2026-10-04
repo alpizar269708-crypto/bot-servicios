@@ -1253,12 +1253,6 @@ async function handleServiceUserMessage(msg, serviceUser) {
       "💵 " + money(result.total)
     );
 
-    await sendServiceGroupNotice(
-      "💰 *PAGO REGISTRADO*\n" +
-      "👤 " + result.person.name + "\n" +
-      "💵 " + money(result.total) + "\n" +
-      serviceUserLabel(serviceUser)
-    );
     return true;
   }
 
