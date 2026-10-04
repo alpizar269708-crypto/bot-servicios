@@ -556,9 +556,22 @@ function commandOf(text) {
   if (fuzzyWord(joined, ["activarbotservicios", "activarbotaqui"], 2)) return "activar";
   if (fuzzyWord(joined, ["desactivarbotservicios", "desactivarbotaqui"], 2)) return "desactivar";
 
+  // Menú especial de teléfonos y usuarios de servicios.
+  if (words.length <= 2 && (
+    fuzzyWord(first, ["menutel", "menutels", "menutelefonos", "menutelefono"], 2) ||
+    fuzzyPhrase(words, ["menu tel", "menu telefono", "menu telefonos"])
+  )) {
+    return "menutel";
+  }
+
   // Control de teléfonos de usuarios de servicios.
-  if (words.length === 1 && /^(?:vertel|vertelefonos|telefonos|telefonosservicios)$/i.test(first)) {
-    return "vertel";
+  if (fuzzyWord(first, ["vertel", "vertelefonos", "telefonos", "telefonosservicios"], 2)) {
+    return words.length > 1 ? "vertel_busqueda" : "vertel";
+  }
+
+  // Modificar el nombre de un usuario de servicios.
+  if (fuzzyWord(first, ["modtel", "modificartelefono", "modnombre", "cambiarnombre"], 2)) {
+    return "modtel";
   }
 
   // Auditoría por número de usuario operativo:
@@ -969,6 +982,77 @@ function auditUserArg(parts) {
   return raw;
 }
 
+function auditRowsTotal(rows) {
+  return (rows || []).reduce((sum, row) => sum + Number(row?.amount || 0), 0);
+}
+
+async function findServiceUsersByNameQuery(query) {
+  const value = String(query || "").trim().replace(/\s+/g, " ");
+  if (!value) return [];
+
+  const { serviceUsers } = await collections();
+  const users = await serviceUsers.find({ active: true })
+    .sort({ activatedAt: 1, name: 1 })
+    .toArray();
+
+  const q = compactServiceUserName(value);
+  if (!q) return [];
+
+  const scored = users.map(user => {
+    const candidates = [user.name, user.folio].filter(Boolean);
+    let best = Infinity;
+    let matchedByContains = false;
+
+    for (const candidate of candidates) {
+      const c = compactServiceUserName(candidate);
+      if (!c) continue;
+
+      if (c === q) {
+        best = -100;
+        matchedByContains = true;
+        continue;
+      }
+
+      if (c.startsWith(q)) {
+        best = Math.min(best, -50 + Math.max(0, c.length - q.length) / 100);
+        matchedByContains = true;
+        continue;
+      }
+
+      if (c.includes(q) || q.includes(c)) {
+        best = Math.min(best, -25 + Math.abs(c.length - q.length) / 100);
+        matchedByContains = true;
+        continue;
+      }
+
+      const distance = serviceUserEditDistance(value, candidate);
+      const maxLen = Math.max(q.length, c.length);
+      const ratio = maxLen ? distance / maxLen : 1;
+      best = Math.min(best, ratio);
+    }
+
+    return { user, score: best, matchedByContains };
+  })
+  .sort((a, b) => a.score - b.score);
+
+  if (!scored.length) return [];
+
+  // Las coincidencias parciales por nombre son prioritarias.
+  const contains = scored.filter(x => x.matchedByContains);
+  if (contains.length) return contains.map(x => x.user);
+
+  // Para errores de escritura, conserva la tolerancia ya usada por las auditorías.
+  const qLen = q.length;
+  const maxDistance = qLen <= 5 ? 1 : qLen <= 9 ? 2 : 3;
+  const matches = scored.filter(x => {
+    const candidates = [x.user.name, x.user.folio].filter(Boolean);
+    const distance = Math.min(...candidates.map(candidate => serviceUserEditDistance(value, candidate)));
+    return distance <= maxDistance;
+  });
+
+  return matches.map(x => x.user);
+}
+
 function auditDate(value) {
   if (!value) return "";
   const d = new Date(value);
@@ -999,8 +1083,80 @@ async function handleServiceUserMessage(msg, serviceUser) {
   const first = norm(parts[0]);
   const joined = parts.map(norm).join(" ");
 
-  // Selecciones pendientes exclusivas de Usuario.
+  // Selecciones pendientes de modificación de nombre.
   const pending = await getPendingAction(jid);
+
+  if (pending?.type === "modtel_select") {
+    if (!(await isOwnerAnywhere(jid, msg))) {
+      await clearPendingAction(jid);
+      return true;
+    }
+
+    const n = selectionNumberFromText(text.trim());
+    const selected = n ? pending.rows?.[n - 1] : null;
+
+    if (!selected) {
+      await send(jid, "❌ Escribe el número de la persona que quieres modificar.");
+      return true;
+    }
+
+    await savePendingAction(jid, {
+      type: "modtel_name",
+      userId: selected._id,
+      oldName: selected.name || selected.folio || "Usuario"
+    });
+
+    await send(jid,
+      "✏️ *CAMBIAR NOMBRE*\n\n" +
+      "👤 Actual: *" + (selected.name || selected.folio || "Usuario") + "*\n\n" +
+      "Escribe ahora el *nuevo nombre*."
+    );
+    return true;
+  }
+
+  if (pending?.type === "modtel_name") {
+    if (!(await isOwnerAnywhere(jid, msg))) {
+      await clearPendingAction(jid);
+      return true;
+    }
+
+    const newName = String(text || "").trim().replace(/^!/, "").replace(/\s+/g, " ").trim();
+
+    if (!newName || newName.length < 2 || newName.length > 80 || /^(cancelar|cancel)$/i.test(newName)) {
+      if (/^(cancelar|cancel)$/i.test(newName)) {
+        await clearPendingAction(jid);
+        await send(jid, "✅ Modificación cancelada.");
+      } else {
+        await send(jid, "❌ Escribe un nombre válido para el usuario.");
+      }
+      return true;
+    }
+
+    const { serviceUsers } = await collections();
+    const current = await serviceUsers.findOne({ _id: pending.userId, active: true });
+
+    if (!current) {
+      await clearPendingAction(jid);
+      await send(jid, "❌ Ese usuario ya no está activo.");
+      return true;
+    }
+
+    await serviceUsers.updateOne(
+      { _id: current._id },
+      { $set: { name: newName, updatedAt: new Date() } }
+    );
+    await clearPendingAction(jid);
+
+    await send(jid,
+      "✅ *NOMBRE ACTUALIZADO*\n\n" +
+      "📱 " + formatTel(current.phone) + "\n" +
+      "👤 Antes: *" + (current.name || current.folio || "Usuario") + "*\n" +
+      "👤 Ahora: *" + newName + "*"
+    );
+    return true;
+  }
+
+  // Selecciones pendientes exclusivas de Usuario.
   if (pending && (pending.type === "service_user_pay_select" || pending.type === "service_user_delete_select")) {
     const n = selectionNumberFromText(text.trim());
 
@@ -1084,7 +1240,12 @@ async function handleServiceUserMessage(msg, serviceUser) {
       ""
     ).join("\n");
 
-    await send(jid, "💰 *PAGOS REGISTRADOS POR " + (target.name || target.folio).toUpperCase() + "*\n\n" + body);
+    const auditTotal = auditRowsTotal(rows);
+    await send(jid,
+      "💰 *PAGOS REGISTRADOS POR " + (target.name || target.folio).toUpperCase() + "*\n\n" +
+      body +
+      "\n\n💰 *TOTAL: " + money(auditTotal) + "*"
+    );
     return true;
   }
 
@@ -1117,7 +1278,12 @@ async function handleServiceUserMessage(msg, serviceUser) {
       (auditDate(x.createdAt) ? "\n" + auditDate(x.createdAt) : "")
     ).join("\n\n");
 
-    await send(jid, "🧾 *SERVICIOS REGISTRADOS POR " + (target.name || target.folio).toUpperCase() + "*\n\n" + body);
+    const auditTotal = auditRowsTotal(rows);
+    await send(jid,
+      "🧾 *SERVICIOS REGISTRADOS POR " + (target.name || target.folio).toUpperCase() + "*\n\n" +
+      body +
+      "\n\n💰 *TOTAL: " + money(auditTotal) + "*"
+    );
     return true;
   }
 
@@ -4140,16 +4306,69 @@ async function handleMessage(msg) {
     return;
   }
 
-  if (command === "vertel") {
+  if (command === "menutel") {
+    if (!(await isOwnerAnywhere(jid, msg))) {
+      await send(jid, "🔒 Este comando solo está disponible para el propietario.");
+      return;
+    }
+
+    await send(jid,
+      "📱 *MENÚ DE TELÉFONOS Y USUARIOS*\n\n" +
+      "• *vertel* — muestra todos los usuarios y sus teléfonos.\n" +
+      "• *vertel Leo* — busca por nombre, aunque escribas solo una parte.\n" +
+      "• *verusuarios* — muestra los usuarios numerados.\n" +
+      "• *listapagos1* — pagos registrados por el usuario #1.\n" +
+      "• *listapagados1* — pagos hechos/pagados al usuario #1.\n" +
+      "• *listaservicios1* — servicios registrados por el usuario #1.\n" +
+      "• *modtel Leo* — busca al usuario para cambiarle el nombre.\n\n" +
+      "💡 Si una búsqueda encuentra varias personas, el bot te mostrará la lista y podrás elegir por número."
+    );
+    return;
+  }
+
+  if (command === "vertel" || command === "vertel_busqueda") {
     if (!(await isOwnerAnywhere(jid, msg))) {
       await send(jid, "🔒 Este comando solo está disponible para el propietario.");
       return;
     }
 
     const { serviceUsers } = await collections();
-    const users = await serviceUsers.find({ active: true })
-      .sort({ activatedAt: 1, name: 1 })
-      .toArray();
+    let users;
+
+    if (command === "vertel") {
+      users = await serviceUsers.find({ active: true })
+        .sort({ activatedAt: 1, name: 1 })
+        .toArray();
+    } else {
+      const rawArgs = text.trim().replace(/^!/, "").trim();
+      const requested = rawArgs.replace(/^(?:vertel|vertelefonos|telefonos|telefonosservicios)\s*/i, "").trim();
+
+      if (!requested) {
+        await send(jid, "❌ Escribe un nombre después de *vertel*. Ejemplo: *vertel Leo*.");
+        return;
+      }
+
+      users = await findServiceUsersByNameQuery(requested);
+
+      if (!users.length) {
+        await send(jid, "❌ No encontré un usuario parecido a *" + requested + "*.");
+        return;
+      }
+
+      if (users.length > 1) {
+        const body = users.map((x, i) =>
+          (i + 1) + ". 👤 *" + (x.name || x.folio || "Usuario") + "*\n📱 " +
+          (formatTel(x.phone) || "Sin teléfono registrado")
+        ).join("\n\n");
+
+        await send(jid,
+          "📱 *COINCIDENCIAS PARA: " + requested.toUpperCase() + "*\n\n" +
+          body +
+          "\n\n👉 Puedes usar *vertel Nombre* con una búsqueda más específica."
+        );
+        return;
+      }
+    }
 
     if (!users.length) {
       await send(jid, "📭 No hay usuarios de servicios activos.");
@@ -4162,7 +4381,67 @@ async function handleMessage(msg) {
       return (i + 1) + ". 👤 *" + label + "*\n📱 " + phone;
     }).join("\n\n");
 
-    await send(jid, "📱 *TELÉFONOS DE USUARIOS DE SERVICIOS*\n\n" + body);
+    await send(jid,
+      command === "vertel_busqueda"
+        ? "📱 *TELÉFONO ENCONTRADO*\n\n" + body
+        : "📱 *TELÉFONOS DE USUARIOS DE SERVICIOS*\n\n" + body
+    );
+    return;
+  }
+
+  if (command === "modtel") {
+    if (!(await isOwnerAnywhere(jid, msg))) {
+      await send(jid, "🔒 Este comando solo está disponible para el propietario.");
+      return;
+    }
+
+    const rawArgs = text.trim().replace(/^!/, "").trim();
+    const requested = rawArgs.replace(/^(?:modtel|modnombre|cambiarnombre|modificartelefono)\s*/i, "").trim();
+
+    if (!requested) {
+      await send(jid, "❌ Escribe el nombre que quieres modificar. Ejemplo: *modtel Leo*.");
+      return;
+    }
+
+    const users = await findServiceUsersByNameQuery(requested);
+
+    if (!users.length) {
+      await send(jid, "❌ No encontré un usuario parecido a *" + requested + "*.");
+      return;
+    }
+
+    if (users.length > 1) {
+      await savePendingAction(jid, {
+        type: "modtel_select",
+        rows: users
+      });
+
+      const body = users.map((x, i) =>
+        (i + 1) + ". 👤 *" + (x.name || x.folio || "Usuario") + "*\n📱 " +
+        (formatTel(x.phone) || "Sin teléfono registrado")
+      ).join("\n\n");
+
+      await send(jid,
+        "✏️ *¿A CUÁL USUARIO QUIERES CAMBIARLE EL NOMBRE?*\n\n" +
+        body +
+        "\n\n👉 Responde con el *número* de la persona."
+      );
+      return;
+    }
+
+    const selected = users[0];
+    await savePendingAction(jid, {
+      type: "modtel_name",
+      userId: selected._id,
+      oldName: selected.name || selected.folio || "Usuario"
+    });
+
+    await send(jid,
+      "✏️ *CAMBIAR NOMBRE*\n\n" +
+      "📱 " + (formatTel(selected.phone) || "Sin teléfono registrado") + "\n" +
+      "👤 Actual: *" + (selected.name || selected.folio || "Usuario") + "*\n\n" +
+      "Escribe ahora el *nuevo nombre*."
+    );
     return;
   }
 
@@ -4226,7 +4505,13 @@ async function handleMessage(msg) {
         ? "💰 *PAGOS REGISTRADOS POR "
         : "🧾 *SERVICIOS REGISTRADOS POR ";
 
-    await send(jid, title + (target.name || target.folio).toUpperCase() + "*\n\n" + body);
+    const auditTotal = auditRowsTotal(rows);
+
+    await send(jid,
+      title + (target.name || target.folio).toUpperCase() + "*\n\n" +
+      body +
+      "\n\n💰 *TOTAL: " + money(auditTotal) + "*"
+    );
     return;
   }
 
@@ -4265,9 +4550,13 @@ async function handleMessage(msg) {
       (auditDate(x.createdAt) ? " — " + auditDate(x.createdAt) : "")
     ).join("\n");
 
+    const auditTotal = auditRowsTotal(rows);
+
     await send(jid,
       (command === "listapagados" ? "💵 *PAGADOS A " : (isPayments ? "💰 *PAGOS REGISTRADOS POR " : "🧾 *SERVICIOS REGISTRADOS POR ")) +
-      (target.name || target.folio).toUpperCase() + "*\n\n" + body
+      (target.name || target.folio).toUpperCase() + "*\n\n" +
+      body +
+      "\n\n💰 *TOTAL: " + money(auditTotal) + "*"
     );
     return;
   }
