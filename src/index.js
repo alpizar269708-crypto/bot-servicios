@@ -974,11 +974,13 @@ function auditDate(value) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "";
   return d.toLocaleString("es-MX", {
+    timeZone: "America/Mexico_City",
     day: "2-digit",
     month: "2-digit",
     year: "2-digit",
     hour: "2-digit",
-    minute: "2-digit"
+    minute: "2-digit",
+    hour12: true
   });
 }
 
@@ -1024,12 +1026,6 @@ async function handleServiceUserMessage(msg, serviceUser) {
         "💵 " + money(result.total)
       );
 
-      await sendServiceGroupNotice(
-        "💰 *PAGO REGISTRADO*\n" +
-        "👤 " + result.person.name + "\n" +
-        "💵 " + money(result.total) + "\n" +
-        serviceUserLabel(serviceUser)
-      );
       return true;
     }
 
@@ -2183,6 +2179,15 @@ async function payServices(name, serviceIds, recordedBy = null) {
 
   await c.payments.insertOne(paymentDoc);
 
+  if (recordedBy?.phone) {
+    await sendServiceGroupNotice(
+      "💰 *PAGO REGISTRADO*\n" +
+      "👤 " + p.name + "\n" +
+      "💵 " + money(total) + "\n" +
+      serviceUserLabel(recordedBy)
+    );
+  }
+
   return { ok: true, person: p, total, count: pending.length, services: pending };
 }
 
@@ -3008,12 +3013,6 @@ async function handleMessage(msg) {
         (result.count > 1 ? "\n🧾 " + result.count + " servicios" : "")
       );
 
-      await sendServiceGroupNotice(
-        "💰 *PAGO REGISTRADO*\n" +
-        "👤 " + result.person.name + "\n" +
-        "💵 " + money(result.total) + "\n" +
-        serviceUserLabel(serviceUser)
-      );
       return;
     }
 
