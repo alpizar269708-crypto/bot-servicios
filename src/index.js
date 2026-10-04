@@ -4055,8 +4055,8 @@ async function handleMessage(msg) {
 
     await send(jid,
       "👥 *DEUDORES*\n\n" + body +
-      "\n\n💰 Total pendiente: *" + money(total) +
-      (serviceUser ? "\n\n👉 Escribe el número de un deudor (por ejemplo *10*) para registrar su pago." : "")
+      "\n\n💰 Total pendiente: *" + money(total) + "*"
+      + (serviceUser ? "\n\n👉 Escribe el número de un deudor (por ejemplo *10*) para registrar su pago." : "")
     );
 
     if (serviceUser) {
