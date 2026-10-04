@@ -1014,56 +1014,60 @@ async function findServiceUsersByNameQuery(query) {
   const scored = users.map(user => {
     const candidates = [user.name, user.folio].filter(Boolean);
     let best = Infinity;
-    let matchedByContains = false;
+    let partial = false;
 
     for (const candidate of candidates) {
-      const c = compactServiceUserName(candidate);
-      if (!c) continue;
+      const original = norm(candidate);
+      const compact = compactServiceUserName(candidate);
+      if (!compact) continue;
 
-      if (c === q) {
-        best = -100;
-        matchedByContains = true;
+      if (compact === q || compact.includes(q)) {
+        best = Math.min(best, compact === q ? -100 : -80);
+        partial = true;
         continue;
       }
 
-      if (c.startsWith(q)) {
-        best = Math.min(best, -50 + Math.max(0, c.length - q.length) / 100);
-        matchedByContains = true;
+      const words = original.split(/[\s\-_.,/]+/).filter(Boolean);
+      if (words.some(word => compactServiceUserName(word).includes(q))) {
+        best = Math.min(best, -70);
+        partial = true;
         continue;
       }
 
-      if (c.includes(q) || q.includes(c)) {
-        best = Math.min(best, -25 + Math.abs(c.length - q.length) / 100);
-        matchedByContains = true;
+      if (q.includes(compact)) {
+        best = Math.min(best, -60);
+        partial = true;
         continue;
       }
 
       const distance = serviceUserEditDistance(value, candidate);
-      const maxLen = Math.max(q.length, c.length);
+      const maxLen = Math.max(q.length, compact.length);
       const ratio = maxLen ? distance / maxLen : 1;
       best = Math.min(best, ratio);
     }
 
-    return { user, score: best, matchedByContains };
-  })
-  .sort((a, b) => a.score - b.score);
+    return { user, score: best, partial };
+  }).sort((a, b) => a.score - b.score);
 
   if (!scored.length) return [];
 
-  // Las coincidencias parciales por nombre son prioritarias.
-  const contains = scored.filter(x => x.matchedByContains);
-  if (contains.length) return contains.map(x => x.user);
+  // Devuelve TODAS las coincidencias parciales.
+  // Ejemplo: "vertel ines" encuentra "Inés" y "Inés-Karla".
+  const partialMatches = scored.filter(x => x.partial).map(x => x.user);
+  if (partialMatches.length) return partialMatches;
 
-  // Para errores de escritura, conserva la tolerancia ya usada por las auditorías.
   const qLen = q.length;
   const maxDistance = qLen <= 5 ? 1 : qLen <= 9 ? 2 : 3;
-  const matches = scored.filter(x => {
-    const candidates = [x.user.name, x.user.folio].filter(Boolean);
-    const distance = Math.min(...candidates.map(candidate => serviceUserEditDistance(value, candidate)));
-    return distance <= maxDistance;
-  });
 
-  return matches.map(x => x.user);
+  return scored
+    .filter(x => {
+      const candidates = [x.user.name, x.user.folio].filter(Boolean);
+      const distance = Math.min(
+        ...candidates.map(candidate => serviceUserEditDistance(value, candidate))
+      );
+      return distance <= maxDistance;
+    })
+    .map(x => x.user);
 }
 
 function auditDate(value) {
