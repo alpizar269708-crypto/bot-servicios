@@ -303,13 +303,27 @@ async function cleanupServiceUserAudit(options = {}) {
 
 
 function phoneFromJid(jid) {
-  return cleanPhone(String(jid || "").split("@")[0].split(":")[0]);
+  const raw = String(jid || "").trim();
+  if (!raw) return "";
+
+  // WhatsApp puede entregar números normales, JID @s.whatsapp.net,
+  // LID y JID con ":device". Primero quitamos el tipo de JID.
+  let value = raw.split("@")[0].split(":")[0];
+
+  // Si llega como JID LID, el número real se obtiene por los campos
+  // alternativos del mensaje; aquí no inventamos un teléfono.
+  return cleanPhone(value);
 }
 
 function formatTel(phone) {
   const digits = cleanPhone(phone);
-  if (digits.length !== 10) return digits;
-  return digits.slice(0, 3) + " " + digits.slice(3, 6) + " " + digits.slice(6);
+  if (digits.length === 12 && digits.startsWith("52")) {
+    return digits.slice(2, 5) + " " + digits.slice(5, 8) + " " + digits.slice(8);
+  }
+  if (digits.length === 10) {
+    return digits.slice(0, 3) + " " + digits.slice(3, 6) + " " + digits.slice(6);
+  }
+  return digits;
 }
 
 function money(n) {
@@ -544,6 +558,11 @@ function commandOf(text) {
   if (words.length === 1 && isCancelText(first)) return "cancelar";
   if (fuzzyWord(joined, ["activarbotservicios", "activarbotaqui"], 2)) return "activar";
   if (fuzzyWord(joined, ["desactivarbotservicios", "desactivarbotaqui"], 2)) return "desactivar";
+
+  // Control de teléfonos de usuarios de servicios.
+  if (words.length === 1 && /^(?:vertel|vertelefonos|telefonos|telefonosservicios)$/i.test(first)) {
+    return "vertel";
+  }
 
   // Auditoría por número de usuario operativo:
   // listapagos1, listapagados1, listaservicios1.
@@ -796,9 +815,21 @@ async function getServiceUserByJid(jid, msg = null) {
   if (!candidates.size) return null;
 
   const { serviceUsers } = await collections();
+  const candidateVariants = new Set();
+  for (const phone of candidates) {
+    const p = cleanPhone(phone);
+    if (!p) continue;
+    candidateVariants.add(p);
+    if (p.length === 12 && p.startsWith("52")) candidateVariants.add(p.slice(2));
+    if (p.length === 10) candidateVariants.add("52" + p);
+  }
+
   const rows = await serviceUsers.find({
-    phone: { $in: [...candidates] },
-    active: true
+    active: true,
+    $or: [
+      { phone: { $in: [...candidateVariants] } },
+      { phone: { $in: [...candidates] } }
+    ]
   }).limit(1).toArray();
 
   return rows[0] || null;
@@ -4124,6 +4155,32 @@ async function handleMessage(msg) {
       "👤 " + result.service.personName + "\n" +
       "💵 " + money(result.service.amount)
     );
+    return;
+  }
+
+  if (command === "vertel") {
+    if (!(await isOwnerAnywhere(jid, msg))) {
+      await send(jid, "🔒 Este comando solo está disponible para el propietario.");
+      return;
+    }
+
+    const { serviceUsers } = await collections();
+    const users = await serviceUsers.find({ active: true })
+      .sort({ activatedAt: 1, name: 1 })
+      .toArray();
+
+    if (!users.length) {
+      await send(jid, "📭 No hay usuarios de servicios activos.");
+      return;
+    }
+
+    const body = users.map((x, i) => {
+      const label = x.name || x.folio || "Usuario";
+      const phone = formatTel(x.phone) || "Sin teléfono registrado";
+      return (i + 1) + ". 👤 *" + label + "*\n📱 " + phone;
+    }).join("\n\n");
+
+    await send(jid, "📱 *TELÉFONOS DE USUARIOS DE SERVICIOS*\n\n" + body);
     return;
   }
 
