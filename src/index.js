@@ -514,6 +514,13 @@ function commandOf(text) {
   const first = words[0];
   const joined = words.join(" ");
 
+  // Permite escribir el nombre primero y "transferencia" al final:
+  // "Juan Pérez transferencia" o "Juan Pérez transferencia 250".
+  // Debe resolverse antes de los comandos por palabras sueltas.
+  if (words.length >= 2 && isTransferWord(words[words.length - 1])) {
+    return "transferencia";
+  }
+
   // Teléfonos: reconocer el comando por prefijo antes de cualquier otro
   // comando/fuzzy matching. Así "vertel Leo", "vertel leo" y similares
   // siempre llegan al buscador de usuarios.
