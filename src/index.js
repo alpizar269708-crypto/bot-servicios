@@ -997,8 +997,7 @@ async function resolveServiceUserForAudit(name) {
 }
 
 function auditUserArg(parts) {
-  let raw = parts.slice(1).join(" ").trim();
-  if (raw.startsWith("(") && raw.endsWith(")")) raw = raw.slice(1, -1).trim();
+  let raw = parts.slice(1).join(" ").trim();  if (raw.startsWith("(") && raw.endsWith(")")) raw = raw.slice(1, -1).trim();
   return raw;
 }
 
@@ -1997,8 +1996,7 @@ async function newAccount(initialAmount) {
             withdrawals: previousSummary.withdrawnTotal,
             transfers: previousSummary.transferTotal,
             netTotal: previousSummary.netTotal,
-            pending: previousSummary.pendingTotal,
-            paid: previousSummary.paidTotal
+            pending: previousSummary.pendingTotal,            paid: previousSummary.paidTotal
           }
         }
       }
@@ -2997,8 +2995,7 @@ async function handleMessage(msg) {
   if (!jid) return;
 
   const text =
-    msg.message?.conversation ||
-    msg.message?.extendedTextMessage?.text ||
+    msg.message?.conversation ||    msg.message?.extendedTextMessage?.text ||
     msg.message?.imageMessage?.caption ||
     msg.message?.videoMessage?.caption ||
     "";
@@ -3224,7 +3221,7 @@ async function handleMessage(msg) {
           "🧾 " + result.count + " servicios\n" +
           "💵 " + money(result.total) + "\n\n" +
           "🧮 Ajuste: -" + money(result.total) + "\n" +
-          "💰 Suma actual: *" + money(transferSummary.netTotal) + "*"
+          "💰 Suma actual: *" + money(transferSummary.accountTotal) + "*"
         );
       } else {
         await send(jid, "ℹ️ Esas deudas ya no están pendientes.");
@@ -3409,7 +3406,7 @@ async function handleMessage(msg) {
           "🧾 " + result.count + " " + (result.count === 1 ? "servicio" : "servicios") + "\n" +
           "💵 " + money(result.total) + "\n\n" +
           "🧮 Ajuste: -" + money(result.total) + "\n" +
-          "💰 Suma actual: *" + money(transferSummary.netTotal) + "*"
+          "💰 Suma actual: *" + money(transferSummary.accountTotal) + "*"
         );
       } else {
         await send(jid, "ℹ️ Esas deudas ya no están pendientes.");
@@ -3997,8 +3994,7 @@ async function handleMessage(msg) {
 
     const results = [];
     for (const g of grouped.values()) {
-      const result = await pay(g.name);
-      if (result.ok) {
+      const result = await pay(g.name);      if (result.ok) {
         results.push("✅ " + g.name + " — " + money(result.total));
       }
     }
@@ -4879,7 +4875,7 @@ async function handleMessage(msg) {
           "👤 " + result.person.name + "\n" +
           "💵 " + money(result.total) + "\n\n" +
           "🧮 Ajuste: -" + money(result.total) + "\n" +
-          "💰 Suma actual: *" + money(transferSummary.netTotal) + "*"
+          "💰 Suma actual: *" + money(transferSummary.accountTotal) + "*"
         );
         return;
       }
@@ -4914,7 +4910,7 @@ async function handleMessage(msg) {
       "👤 " + name + "\n" +
       "💵 " + money(a.amount) + "\n\n" +
       "🧮 Ajuste: -" + money(ajuste) + "\n" +
-      "💰 Suma actual: *" + money(transferSummary.netTotal) + "*"
+      "💰 Suma actual: *" + money(transferSummary.accountTotal) + "*"
     );
     return;
   }
@@ -4952,7 +4948,7 @@ async function handleMessage(msg) {
       "👤 " + name + "\n" +
       "💵 " + money(a.amount) + "\n\n" +
       "➖ Descontado de caja: *" + money(a.amount) + "*\n" +
-      "💰 Disponible actual: *" + money(updated.netTotal) + "*"
+      "💰 Disponible actual: *" + money(updated.accountTotal) + "*"
     );
     return;
   }
@@ -4997,7 +4993,6 @@ async function handleMessage(msg) {
   if (command === "cuenta_nueva") {
     let args = text.trim();
     if (args.startsWith(PREFIX)) args = args.slice(PREFIX.length).trim();
-
     // "cuenta nueva" acepta el monto de inicio aunque venga:
     // - con comas: 1,000 / 10,000
     // - sin comas: 1000 / 10000
@@ -5247,7 +5242,7 @@ async function handleMessage(msg) {
           "🔄 *TRANSFERENCIA*\n" +
           "👤 " + name + "\n" +
           "💵 " + money(a.amount) + "\n\n" +
-          "💰 Suma actual: *" + money(transferSummary.netTotal) + "*"
+          "💰 Suma actual: *" + money(transferSummary.accountTotal) + "*"
         );
       } else {
         const summary = await servicesSummary();
