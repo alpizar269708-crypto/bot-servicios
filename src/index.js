@@ -3682,21 +3682,14 @@ async function handleMessage(msg) {
 
     if (/^(?:menutel|menutels|menutelefono|menutelefonos)$/i.test(directCommand)) {
       await send(jid,
-        "📱 *MENÚ DE TELÉFONOS*\n\n" +
-        "1. 📥 *guardartel* — guardar un teléfono\n" +
-        "   Ej.: guardartel Juan Pérez 5512345678\n\n" +
-        "2. 🔎 *vertel* — buscar por nombre o teléfono\n" +
-        "   Ej.: vertel Leo\n" +
-        "   También encuentra coincidencias dentro del nombre.\n\n" +
-        "3. 📋 *vertodos* — mostrar todos los teléfonos guardados\n\n" +
-        "4. 🗑️ *eliminartel* — eliminar un registro\n" +
-        "   Ej.: eliminartel Leo\n" +
-        "   O por posición: eliminartel 3\n" +
-        "   O por teléfono: eliminartel 5512345678\n\n" +
-        "5. 📦 *guardartelmasivo* — guardar varios teléfonos\n\n" +
-        "6. 🔄 *portabilidad* — guardar datos de portabilidad\n\n" +
-        "7. ✅ *portafin* — finalizar una portabilidad y guardar el número\n\n" +
-        "💡 *Importante:* estos comandos trabajan sobre el mismo registro de teléfonos."
+        "📱 *TELÉFONOS*\n\n" +
+        "📥 *1*  guardartel\n" +
+        "🔎 *2*  vertel\n" +
+        "📋 *3*  vertodos\n" +
+        "🗑️ *4*  eliminartel\n" +
+        "📦 *5*  guardartelmasivo\n" +
+        "🔄 *6*  portabilidad\n" +
+        "✅ *7*  portafin"
       );
       return;
     }
