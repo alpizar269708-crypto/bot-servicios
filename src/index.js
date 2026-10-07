@@ -410,9 +410,11 @@ function isPaymentWord(word) {
 
 function isTransferWord(word) {
   const w = norm(word);
-  // Los números nunca deben interpretarse como "transferencia".
+  // Una sola letra NO debe convertirse por similitud en una transferencia.
+  // Ej.: "Mauricio P" es un nombre y la "P" no significa transferencia.
   if (!/[a-záéíóúñ]/i.test(w)) return false;
-  return fuzzyWord(w, ["t", "tr", "tra", "trans", "transf", "transfer", "transferencia"], 1);
+  if (w.length === 1) return w === "t";
+  return fuzzyWord(w, ["tr", "tra", "trans", "transf", "transfer", "transferencia"], 1);
 }
 
 function isRetiroWord(word) {
