@@ -667,6 +667,16 @@ function quotedText(msg) {
   ).trim();
 }
 
+function quotedTransferName(text) {
+  const t = String(text || "").trim();
+  if (!t || !/TRANSFERENCIA/i.test(t)) return "";
+
+  const m = t.match(/^\s*👤\s*(.+?)\s*$/im);
+  if (m) return m[1].replace(/[*_]/g, "").trim();
+
+  return quotedServiceName(t);
+}
+
 function quotedServiceName(text) {
   const t = String(text || "").trim();
   if (!t) return "";
@@ -3509,6 +3519,13 @@ async function handleMessage(msg) {
 
   if (
     quoted &&
+    /^\s*\S+\s*$/.test(text) &&
+    fuzzyWord(norm(text), ["error"], 2) &&
+    /TRANSFERENCIA/i.test(quoted)
+  ) {
+    command = "errortransferencia";
+  } else if (
+    quoted &&
     /PAGO\s+REGISTRADO/i.test(quoted) &&
     /^\s*\S+\s*$/.test(text) &&
     fuzzyWord(norm(text), ["error"], 2)
@@ -4111,6 +4128,54 @@ async function handleMessage(msg) {
         }))
       });
     }
+    return;
+  }
+
+  if (command === "errortransferencia") {
+    const name = quotedTransferName(quoted);
+
+    if (!name) {
+      await send(jid, "❌ No pude identificar la transferencia que quieres corregir.");
+      return;
+    }
+
+    const result = await undoTransfer(name);
+
+    if (!result.ok) {
+      await send(jid,
+        result.reason === "not_found"
+          ? "❌ No encuentro a *" + name + "*."
+          : "ℹ️ No encontré una transferencia reciente de *" + name + "* para corregir."
+      );
+      return;
+    }
+
+    const rows = await debtors();
+    const body = rows.length
+      ? rows.map((x, i) =>
+          (i + 1) + ". 👤 *" + x.name + "*\n" +
+          "💵 " + money(x.total) + "\n" +
+          "📅 " + new Date().toLocaleDateString("es-MX", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "2-digit"
+          })
+        ).join("\n\n")
+      : "No hay deudores.";
+
+    const total = rows.reduce((s, x) => s + Number(x.total || 0), 0);
+    const summary = await servicesSummary();
+
+    await send(jid,
+      "↩️ *TRANSFERENCIA CORREGIDA*\n" +
+      "👤 " + result.person.name + "\n" +
+      "💵 " + money(result.total) + "\n" +
+      "➕ Se devolvió a la cuenta: *" + money(result.total) + "*\n" +
+      "💰 Total actual: *" + money(summary.accountTotal) + "*\n\n" +
+      "👥 *DEUDORES*\n\n" +
+      body +
+      "\n\n💰 Total pendiente: " + money(total)
+    );
     return;
   }
 
