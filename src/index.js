@@ -2287,7 +2287,30 @@ async function undoPayment(name) {
 async function undoTransfer(name) {
   const account = await ensureAccount();
   const c = await collections();
-  const p = await c.people.findOne({ normalizedName: norm(name) });
+
+  // Primero busca por nombre exacto. Si no existe, permite localizar a la
+  // persona por un nombre que contenga lo escrito (ej. "Mauricio P" -> "Mauricio").
+  const rawName = String(name || "").trim();
+  const normalized = norm(rawName);
+  let p = await c.people.findOne({ normalizedName: normalized });
+
+  if (!p && normalized) {
+    const candidates = await c.people.find({
+      normalizedName: { $regex: escapeRegex(normalized) }
+    }).toArray();
+
+    if (candidates.length === 1) p = candidates[0];
+  }
+
+  // Si el usuario escribió "Mauricio P", prueba también quitando la última
+  // inicial, porque P es una abreviatura del comando "pago", no parte del nombre.
+  if (!p) {
+    const parts = normalized.split(/\\s+/).filter(Boolean);
+    if (parts.length > 1 && parts[parts.length - 1] === "p") {
+      const base = parts.slice(0, -1).join(" ");
+      p = await c.people.findOne({ normalizedName: base });
+    }
+  }
 
   if (!p) return { ok: false, reason: "not_found" };
 
