@@ -28,6 +28,14 @@ Se normalizan acentos, mayúsculas y espacios para tolerar dictado y pequeñas v
 Las transferencias se guardan, pero no entran en la suma de servicios.
 Los deudores permanecen guardados hasta que se registra su pago.
 
+## CORREGIR UN PAGO REGISTRADO POR ERROR
+
+- Responde al mensaje de confirmación del bot con `errorp` o `errorpago`.
+- También puedes responder `errorp` a otro mensaje que mencione de forma inequívoca a la persona.
+- O escribe `Nombre errorp` o `errorp Nombre`.
+
+El pago más reciente de esa persona en la cuenta activa se deshace y los servicios vuelven a quedar pendientes en `deudores`.
+
 ## MONGODB
 
 Crear una base en MongoDB Atlas, usuario de base de datos y acceso de red para Render.
