@@ -3119,9 +3119,16 @@ async function handleOpenBulkAccountMessage(jid, text) {
     const matches = session.pendingMatches;
     let chosen = null;
     if (/^\d+$/.test(t)) chosen = matches[Number(t) - 1] || null;
-    if (!chosen) chosen = matches.find(p => norm(p.code) === t || norm(p.description) === t) || null;
     if (!chosen) {
-      await send(jid, "❌ No reconocí la selección. Responde con el número, código o descripción exacta de la opción.");
+      const choices = matches.filter(p =>
+        norm(p.code) === t ||
+        norm(p.description) === t ||
+        (t.length >= 2 && (norm(p.code).includes(t) || norm(p.description).includes(t)))
+      );
+      if (choices.length === 1) chosen = choices[0];
+    }
+    if (!chosen) {
+      await send(jid, "❌ No pude elegir una sola opción. Responde con el número de la lista, el código exacto o una descripción que identifique un solo producto.");
       return true;
     }
     await addProductToBulkAccount(jid, session, chosen);
@@ -3133,9 +3140,9 @@ async function handleOpenBulkAccountMessage(jid, text) {
     return true;
   }
   if (matches.length === 1) { await addProductToBulkAccount(jid, session, matches[0]); return true; }
-  session.pendingMatches = matches;
+  session.pendingMatches = matches.slice(0, 10);
   await send(jid, "🔎 Encontré varias coincidencias. Responde con el número, código o descripción de la que quieres sumar:\n\n" +
-    matches.slice(0, 10).map((p, i) => productLine(p, i)).join("\n"));
+    session.pendingMatches.map((p, i) => productLine(p, i)).join("\n"));
   return true;
 }
 
