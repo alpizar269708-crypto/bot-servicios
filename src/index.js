@@ -2274,15 +2274,20 @@ async function servicesSummary() {
   };
 }
 
-async function undoPayment(name) {
+async function undoPayment(name, expectedAmount = null) {
   const account = await ensureAccount();
   const c = await collections();
   const p = await c.people.findOne({ normalizedName: norm(name) });
 
   if (!p) return { ok: false, reason: "not_found" };
 
+  const paymentQuery = { accountNumber: account.number, personId: p._id };
+  if (Number.isFinite(Number(expectedAmount)) && Number(expectedAmount) > 0) {
+    paymentQuery.amount = Number(expectedAmount);
+  }
+
   const payment = await c.payments.findOne(
-    { accountNumber: account.number, personId: p._id },
+    paymentQuery,
     { sort: { createdAt: -1 } }
   );
 
@@ -4227,13 +4232,21 @@ async function handleMessage(msg) {
       return;
     }
 
-    const result = await undoPayment(name);
+    let expectedAmount = null;
+    if (quoted && /PAGO\s+REGISTRADO/i.test(quoted)) {
+      const amountLine = quoted.match(/^\s*💵\s*\$?([\d,]+(?:\.\d{1,2})?)\s*$/im);
+      if (amountLine) expectedAmount = parseAmount(amountLine[1]);
+    }
+
+    const result = await undoPayment(name, expectedAmount);
 
     if (!result.ok) {
       await send(jid,
         result.reason === "not_found"
           ? "❌ No encuentro a *" + name + "*."
-          : "ℹ️ No encontré un pago reciente de *" + name + "* para corregir."
+          : expectedAmount
+            ? "ℹ️ No encontré un pago de *" + name + "* por " + money(expectedAmount) + " para corregir."
+            : "ℹ️ No encontré un pago reciente de *" + name + "* para corregir."
       );
       return;
     }
