@@ -3045,7 +3045,8 @@ async function findProducts(query) {
     .sort((a, b) => b.score - a.score || String(a.product.code).localeCompare(String(b.product.code)));
   if (!ranked.length) return [];
   const prefixes = ranked.filter(x => norm(x.product.code).startsWith(q) || norm(x.product.description).includes(q));
-  const threshold = ranked[0].score >= 800 ? ranked[0].score : Math.max(50, ranked[0].score - 100);
+  const queryTokens = q.split(/\s+/).filter(Boolean);
+  const threshold = ranked[0].score >= 800 ? ranked[0].score : queryTokens.length > 1 ? queryTokens.length * 75 : Math.max(50, ranked[0].score - 100);
   const selected = (prefixes.length ? prefixes : ranked.filter(x => x.score >= threshold)).slice(0, 20);
   return selected.map(x => x.product);
 }
