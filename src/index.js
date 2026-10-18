@@ -3150,7 +3150,7 @@ async function handleOpenBulkAccountMessage(jid, text) {
   if (matches.length === 1) { await addProductToBulkAccount(jid, session, matches[0]); return true; }
   session.pendingMatches = matches.slice(0, 10);
   await send(jid, "🔎 Encontré varias coincidencias. Responde con el número, código o descripción de la que quieres sumar:\n\n" +
-    session.pendingMatches.map((p, i) => productLine(p, i)).join("\n"));
+    session.pendingMatches.map((p, i) => productLine(p, i)).join("\n\n"));
   return true;
 }
 
