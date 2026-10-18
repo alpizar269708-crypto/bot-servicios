@@ -2968,7 +2968,7 @@ async function handleListap(jid, fullText) {
   const { products } = await collections();
   if (!payload) {
     const count = await products.countDocuments({});
-    await send(jid, "📦 *LISTA DE PRODUCTOS*\nProductos guardados: *" + count + "*\n\nEnvía *listap* y debajo una línea por producto:\nCODIGO Descripción del producto $Precio\n\nEjemplo:\nBC25K Becerra Crecimiento 25 Kilos $245.00");
+    await send(jid, "🌾 *LISTA DE PRODUCTOS*\nProductos guardados: *" + count + "*\n\nEnvía *listap* y debajo una línea por producto:\nCODIGO Descripción del producto $Precio\n\nEjemplo:\nBC25K Becerra Crecimiento 25 Kilos $245.00");
     return;
   }
   const parsed = parseProductLines(payload);
@@ -3053,7 +3053,7 @@ async function findProducts(query) {
 
 function productLine(p, index = null) {
   const number = index === null ? "" : (index + 1) + ". ";
-  return number + "📦 *" + p.code + "*\n" +
+  return number + "🌾 *" + p.code + "*\n" +
     "   " + p.description + "\n" +
     "   💵 Precio: *" + money(Number(p.price || 0)) + "*";
 }
@@ -3069,7 +3069,7 @@ async function handlePrice(jid, query) {
 
 function bulkAccountSummary(session) {
   const rows = session.items.map((item, i) =>
-    (i + 1) + ". 📦 *" + item.code + "*\n" +
+    (i + 1) + ". 🌾 *" + item.code + "*\n" +
     "   " + item.description + "\n" +
     "   💵 Precio: *" + money(Number(item.price || 0)) + "*"
   ).join("\n\n");
@@ -3213,7 +3213,7 @@ function menu() {
 }
 function menuBultos() {
   return [
-    "📦 *MENÚ DE BULTOS Y PRECIOS*",
+    "🌾 *MENÚ DE BULTOS Y PRECIOS*",
     "",
     "• *listap* — guarda o actualiza una lista de productos. Usa una línea por producto:",
     "  BC25K Becerra Crecimiento 25 Kilos $245.00",
