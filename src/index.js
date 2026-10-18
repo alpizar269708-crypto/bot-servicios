@@ -3053,8 +3053,8 @@ async function findProducts(query) {
 
 function productLine(p, index = null) {
   const number = index === null ? "" : (index + 1) + ". ";
-  return number + "📦 *" + p.code + "*\\n" +
-    "   " + p.description + "\\n" +
+  return number + "📦 *" + p.code + "*\n" +
+    "   " + p.description + "\n" +
     "   💵 Precio: *" + money(Number(p.price || 0)) + "*";
 }
 
@@ -3069,12 +3069,12 @@ async function handlePrice(jid, query) {
 
 function bulkAccountSummary(session) {
   const rows = session.items.map((item, i) =>
-    (i + 1) + ". 📦 *" + item.code + "*\\n" +
-    "   " + item.description + "\\n" +
+    (i + 1) + ". 📦 *" + item.code + "*\n" +
+    "   " + item.description + "\n" +
     "   💵 Precio: *" + money(Number(item.price || 0)) + "*"
-  ).join("\\n\\n");
-  return "🧾 *CUENTA TEMPORAL*\\n\\n" + (rows ? rows + "\\n\\n" : "Todavía no agregas productos.\\n\\n") +
-    "🔢 Productos agregados: *" + session.items.length + "*\\n" +
+  ).join("\n\n");
+  return "🧾 *CUENTA TEMPORAL*\n\n" + (rows ? rows + "\n\n" : "Todavía no agregas productos.\n\n") +
+    "🔢 Productos agregados: *" + session.items.length + "*\n" +
     "💰 *TOTAL: " + money(session.items.reduce((sum, x) => sum + Number(x.price || 0), 0)) + "*";
 }
 
