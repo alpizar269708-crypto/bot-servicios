@@ -684,7 +684,6 @@ function quotedServiceName(text) {
   // Mensajes del propio bot, por ejemplo:
   // 🧾 SERVICIO REGISTRADO
   // 👤 Kevin
-  // 💵 $135
   const botName = t.match(/^\s*👤\s*(?:Usuario\s*:\s*)?(.+?)\s*$/im);
   if (botName) return botName[1].replace(/[*_]/g, "").trim();
 
@@ -693,6 +692,22 @@ function quotedServiceName(text) {
   if (a) return cleanName(t, a.raw);
 
   return t.replace(/^!/, "").trim();
+}
+
+async function personNameMentionedInText(text) {
+  const normalizedText = norm(text);
+  if (!normalizedText) return "";
+  const { people } = await collections();
+  const candidates = await people.find({}).project({ name: 1, normalizedName: 1 }).toArray();
+  const matches = candidates
+    .filter(p => p.normalizedName && normalizedText.includes(norm(p.normalizedName)))
+    .sort((a, b) => norm(b.normalizedName).length - norm(a.normalizedName).length);
+
+  if (!matches.length) return "";
+  const longest = norm(matches[0].normalizedName).length;
+  const best = matches.filter(p => norm(p.normalizedName).length === longest);
+  const unique = [...new Map(best.map(p => [String(p._id), p])).values()];
+  return unique.length === 1 ? unique[0].name : "";
 }
 
 function paymentNameFromText(text) {
@@ -3531,6 +3546,13 @@ async function handleMessage(msg) {
     fuzzyWord(norm(text), ["error"], 2)
   ) {
     command = "errorpago";
+  } else if (
+    /^\s*(?:.+\s+)?errorp(?:ago)?\s*$/i.test(text) ||
+    /^\s*errorp(?:ago)?\s+.+$/i.test(text)
+  ) {
+    // Acepta "errorp", "errorpago", "Maria errorp" y "errorp Maria".
+    // Si hay una respuesta citada, el manejador decidirá si obtiene el nombre de ella.
+    command = "errorpago";
   } else if (quoted && /^\s*\d+\s*$/.test(text) && /DEUDORES/i.test(quoted)) {
     command = "deudoresp";
   } else {
@@ -4180,10 +4202,28 @@ async function handleMessage(msg) {
   }
 
   if (command === "errorpago") {
-    const name = quotedServiceName(quoted);
+    const typedName = String(text || "")
+      .replace(/^\s*!/, "")
+      .replace(/\berrorp(?:ago)?\b/ig, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    let name = typedName;
+    if (!name && quoted) {
+      // Primero intenta interpretar el mensaje de confirmación del pago.
+      if (/PAGO\s+REGISTRADO/i.test(quoted)) {
+        name = quotedServiceName(quoted);
+      } else {
+        // También admite responder "errorp" a cualquier mensaje que mencione
+        // de forma inequívoca a una persona registrada.
+        name = await personNameMentionedInText(quoted);
+      }
+    }
 
     if (!name) {
-      await send(jid, "❌ No pude identificar el pago que quieres corregir.");
+      await send(jid,
+        "❌ No pude identificar a la persona. Usa *Nombre errorp* o responde *errorp* al mensaje que contiene su nombre."
+      );
       return;
     }
 
