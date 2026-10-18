@@ -570,6 +570,8 @@ function commandOf(text) {
   // Ajuste administrativo MUY específico: solo reconoce el nombre completo.
   if (joined === "ajustetransferenciacaja") return "ajustetransferenciacaja";
 
+  if (words.length >= 2 && /^menu$/i.test(first) && /^servicios?$/i.test(words[1])) return "menu_servicios";
+  if (fuzzyWord(joined, ["menubultos"], 2)) return "menubultos";
   if (fuzzyWord(joined, ["menu", "ayuda"], 2)) return "menu";
   if (fuzzyWord(joined, ["menuextra", "comandos", "ayudaextra", "ayudacomandos"], 2)) return "menuextra";
   if (fuzzyWord(joined, ["menusecreto"], 2)) return "menusecreto";
@@ -745,7 +747,8 @@ async function collections() {
     telRecords: db.collection(COLLECTION + "_tel_records"),
     portability: db.collection(COLLECTION + "_portability"),
     serviceUsers: db.collection(COLLECTION + "_arem_users"),
-    serviceUserBlocks: db.collection(COLLECTION + "_service_user_blocks")
+    serviceUserBlocks: db.collection(COLLECTION + "_service_user_blocks"),
+    products: db.collection(COLLECTION + "_products")
   };
 }
 
@@ -2933,9 +2936,212 @@ async function overwriteCurrentAccountFromList(jid, parsed) {
   };
 }
 
-function menu() {
+
+const bulkAccounts = new Map();
+const BULK_ACCOUNT_TTL_MS = 10 * 60 * 1000;
+
+function normalizeProductCode(value) {
+  return norm(value).replace(/[^a-z0-9._-]/g, "").toUpperCase();
+}
+
+function parseProductLines(raw) {
+  const rows = [];
+  const invalid = [];
+  const lines = String(raw || "").split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const cleaned = line.replace(/^[-•*]+\s*/, "").trim();
+    const match = cleaned.match(/^([A-Za-z0-9][A-Za-z0-9._-]*)\s+(.+?)\s+\$?\s*([\d,]+(?:\.[\d]{1,2})?)\s*$/);
+    if (!match) { invalid.push({ line: i + 1, text: line }); continue; }
+    const code = normalizeProductCode(match[1]);
+    const description = match[2].replace(/\s+/g, " ").trim();
+    const price = Number(match[3].replace(/,/g, ""));
+    if (!code || !description || !Number.isFinite(price) || price < 0) { invalid.push({ line: i + 1, text: line }); continue; }
+    rows.push({ code, description, price, updatedAt: new Date() });
+  }
+  return { rows, invalid };
+}
+
+async function handleListap(jid, fullText) {
+  const payload = String(fullText || "").replace(/^\s*!?listap\b\s*/i, "").trim();
+  const { products } = await collections();
+  if (!payload) {
+    const count = await products.countDocuments({});
+    await send(jid, "📦 *LISTA DE PRODUCTOS*\nProductos guardados: *" + count + "*\n\nEnvía *listap* y debajo una línea por producto:\nCODIGO Descripción del producto $Precio\n\nEjemplo:\nBC25K Becerra Crecimiento 25 Kilos $245.00");
+    return;
+  }
+  const parsed = parseProductLines(payload);
+  if (!parsed.rows.length) {
+    await send(jid, "❌ No pude reconocer productos. Usa una línea por producto: *BC25K Becerra Crecimiento 25 Kilos $245.00*.");
+    return;
+  }
+  const now = new Date();
+  const operations = parsed.rows.map(p => ({
+    updateOne: {
+      filter: { code: p.code },
+      update: { $set: { code: p.code, description: p.description, price: p.price, updatedAt: now }, $setOnInsert: { createdAt: now } },
+      upsert: true
+    }
+  }));
+  const result = await products.bulkWrite(operations, { ordered: false });
+  let response = "✅ *LISTA GUARDADA*\n📦 Leídas: *" + parsed.rows.length + "*\n➕ Nuevas: *" + Number(result.upsertedCount || 0) + "*\n🔄 Actualizadas: *" + Number(result.modifiedCount || 0) + "*";
+  if (parsed.invalid.length) {
+    response += "\n⚠️ Líneas omitidas: " + parsed.invalid.length + "\n" +
+      parsed.invalid.slice(0, 8).map(x => "Línea " + x.line + ": " + x.text.slice(0, 90)).join("\n");
+    if (parsed.invalid.length > 8) response += "\n…y " + (parsed.invalid.length - 8) + " más.";
+  }
+  await send(jid, response);
+}
+
+function levenshteinDistance(a, b) {
+  a = String(a || ""); b = String(b || "");
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const curr = [i];
+    for (let j = 1; j <= b.length; j++) curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = curr;
+  }
+  return prev[b.length];
+}
+
+function productMatchScore(query, product) {
+  const q = norm(query), code = norm(product.code), desc = norm(product.description), all = code + " " + desc;
+  if (!q) return 0;
+  if (code === q) return 1000;
+  if (code.startsWith(q)) return 900 + q.length;
+  if (desc === q) return 850;
+  if (desc.includes(q)) return 800 + q.length;
+  const tokens = q.split(/\s+/).filter(Boolean);
+  const words = all.split(/[^a-z0-9]+/).filter(Boolean);
+  const tokenScore = tokens.reduce((sum, token) => {
+    if (all.includes(token)) return sum + 100;
+    let best = 0;
+    for (const word of words) {
+      if (word.startsWith(token)) best = Math.max(best, 85);
+      else if (token.length >= 4 && levenshteinDistance(token, word) <= Math.max(1, Math.floor(token.length * 0.25))) best = Math.max(best, 55);
+    }
+    return sum + best;
+  }, 0);
+  if (tokens.length && tokenScore >= tokens.length * 75) return tokenScore + (all.includes(q) ? 100 : 0);
+  if (q.length >= 3) {
+    const distances = words.map(word => levenshteinDistance(q, word));
+    const best = distances.length ? Math.min(...distances) : 99;
+    if (best <= Math.max(1, Math.floor(q.length * 0.2))) return 30 + q.length - best;
+  }
+  return 0;
+}
+
+async function findProducts(query) {
+  const { products } = await collections();
+  const q = norm(query);
+  if (!q) return [];
+  const all = await products.find({}).limit(5000).toArray();
+  const ranked = all.map(product => ({ product, score: productMatchScore(q, product) }))
+    .filter(x => x.score > 0)
+    .sort((a, b) => b.score - a.score || String(a.product.code).localeCompare(String(b.product.code)));
+  if (!ranked.length) return [];
+  const prefixes = ranked.filter(x => norm(x.product.code).startsWith(q) || norm(x.product.description).includes(q));
+  const threshold = ranked[0].score >= 800 ? ranked[0].score : Math.max(50, ranked[0].score - 100);
+  const selected = (prefixes.length ? prefixes : ranked.filter(x => x.score >= threshold)).slice(0, 20);
+  return selected.map(x => x.product);
+}
+
+function productLine(p, index = null) {
+  return (index === null ? "" : (index + 1) + ". ") + "*" + p.code + "* — " + p.description + " — *" + money(Number(p.price || 0)) + "*";
+}
+
+async function handlePrice(jid, query) {
+  const matches = await findProducts(query);
+  if (!matches.length) {
+    await send(jid, "🔎 No encontré productos para *" + (query || "esa búsqueda") + "*. Prueba con un código o parte de la descripción.");
+    return;
+  }
+  await send(jid, "💲 *RESULTADOS DE PRECIO*\n\n" + matches.map((p, i) => productLine(p, matches.length > 1 ? i : null)).join("\n"));
+}
+
+function bulkAccountSummary(session) {
+  const rows = session.items.map((item, i) => (i + 1) + ". " + item.code + " — " + item.description + " — " + money(item.price)).join("\n");
+  return "🧾 *CUENTA TEMPORAL*\n" + (rows ? rows + "\n\n" : "Todavía no agregas productos.\n\n") +
+    "📦 Productos: *" + session.items.length + "*\n" +
+    "💰 *TOTAL: " + money(session.items.reduce((sum, x) => sum + Number(x.price || 0), 0)) + "*";
+}
+
+async function openBulkAccount(jid) {
+  const existing = bulkAccounts.get(jid);
+  if (existing && Date.now() < existing.expiresAt) {
+    await send(jid, "🧾 Ya hay una cuenta temporal abierta.\n" + bulkAccountSummary(existing) + "\n\nEnvía un código o descripción, o *cerrarcuenta*.");
+    return;
+  }
+  if (existing) { clearTimeout(existing.timer); bulkAccounts.delete(jid); }
+  const session = { items: [], pendingMatches: null, startedAt: Date.now(), expiresAt: Date.now() + BULK_ACCOUNT_TTL_MS, timer: null };
+  bulkAccounts.set(jid, session);
+  session.timer = setTimeout(async () => {
+    if (bulkAccounts.get(jid) !== session) return;
+    bulkAccounts.delete(jid);
+    await send(jid, "⏰ La cuenta temporal se cerró automáticamente al cumplir 10 minutos.\n" + bulkAccountSummary(session));
+  }, BULK_ACCOUNT_TTL_MS);
+  if (session.timer && typeof session.timer.unref === "function") session.timer.unref();
+  await send(jid, "🧾 *CUENTA TEMPORAL ABIERTA*\nDurará máximo *10 minutos* y no se guardará como cuenta permanente.\n\nEnvía el código o descripción de cada producto. Cada consulta agregará una unidad.\nEscribe *cerrarcuenta* para terminar.");
+}
+
+async function closeBulkAccount(jid, reason = "manual") {
+  const session = bulkAccounts.get(jid);
+  if (!session) { await send(jid, "ℹ️ No tienes una cuenta temporal abierta."); return; }
+  clearTimeout(session.timer);
+  bulkAccounts.delete(jid);
+  await send(jid, (reason === "manual" ? "🔒 *CUENTA CERRADA*" : "⏰ *CUENTA CERRADA POR TIEMPO*") + "\n" + bulkAccountSummary(session));
+}
+
+async function addProductToBulkAccount(jid, session, product) {
+  session.items.push({ code: product.code, description: product.description, price: Number(product.price || 0) });
+  session.pendingMatches = null;
+  await send(jid, "✅ Agregado: " + productLine(product) + "\n\n" + bulkAccountSummary(session) +
+    "\n\n¿Deseas cerrar la cuenta? Responde *sí* para cerrarla o *no* para seguir agregando.");
+}
+
+async function handleOpenBulkAccountMessage(jid, text) {
+  const session = bulkAccounts.get(jid);
+  if (!session) return false;
+  if (Date.now() >= session.expiresAt) { await closeBulkAccount(jid, "timeout"); return true; }
+  const t = norm(text).replace(/[.!¡¿?]/g, "").trim();
+  if (/^(?:cerrarcuenta|cerrar cuenta)$/.test(t)) { await closeBulkAccount(jid, "manual"); return true; }
+  if (/^(?:si|s)$/.test(t)) { await closeBulkAccount(jid, "manual"); return true; }
+  if (/^(?:no|seguir|continua|continuar)$/.test(t)) {
+    session.pendingMatches = null;
+    await send(jid, "👌 Seguimos. Envía el siguiente código o descripción.");
+    return true;
+  }
+  if (session.pendingMatches) {
+    const matches = session.pendingMatches;
+    let chosen = null;
+    if (/^\d+$/.test(t)) chosen = matches[Number(t) - 1] || null;
+    if (!chosen) chosen = matches.find(p => norm(p.code) === t || norm(p.description) === t) || null;
+    if (!chosen) {
+      await send(jid, "❌ No reconocí la selección. Responde con el número, código o descripción exacta de la opción.");
+      return true;
+    }
+    await addProductToBulkAccount(jid, session, chosen);
+    return true;
+  }
+  const matches = await findProducts(text);
+  if (!matches.length) {
+    await send(jid, "🔎 No encontré ese producto. Prueba con su código o parte de la descripción; la cuenta sigue abierta.");
+    return true;
+  }
+  if (matches.length === 1) { await addProductToBulkAccount(jid, session, matches[0]); return true; }
+  session.pendingMatches = matches;
+  await send(jid, "🔎 Encontré varias coincidencias. Responde con el número, código o descripción de la que quieres sumar:\n\n" +
+    matches.slice(0, 10).map((p, i) => productLine(p, i)).join("\n"));
+  return true;
+}
+
+function menuServicios() {
   return [
-    "📋 *MENÚ*",
+    "📋 *MENÚ DE SERVICIOS*",
     "",
     "💵 *PAGO*",
     "Marca un servicio como pagado.",
@@ -2970,6 +3176,35 @@ function menu() {
     "",
     "✂️ *CORTE*",
     "corte — envía servicios, deudores y cierre de cuenta."
+  ].join("\n");
+}
+function menu() {
+  return [
+    "📋 *MENÚ PRINCIPAL*",
+    "",
+    "1️⃣ *Servicios*",
+    "Escribe: *menu servicios*",
+    "",
+    "2️⃣ *Teléfonos y usuarios*",
+    "Escribe: *menutel*",
+    "",
+    "3️⃣ *Bultos, precios y cuenta temporal*",
+    "Escribe: *menubultos*"
+  ].join("\n");
+}
+function menuBultos() {
+  return [
+    "📦 *MENÚ DE BULTOS Y PRECIOS*",
+    "",
+    "• *listap* — guarda o actualiza una lista de productos. Usa una línea por producto:",
+    "  BC25K Becerra Crecimiento 25 Kilos $245.00",
+    "  CAGO25K Caballo el 7 leguas Golden 25 Kilos $305.00",
+    "",
+    "• *precio CC25K* — busca por código o descripción, aceptando fragmentos y errores de escritura.",
+    "• *cuenta* — abre una cuenta temporal por máximo 10 minutos. Cada producto consultado se suma una vez.",
+    "• *cerrarcuenta* — cierra la cuenta y muestra el total.",
+    "",
+    "Después de agregar un producto, responde *sí* para cerrar o *no* para seguir."
   ].join("\n");
 }
 function menuExtra() {
@@ -3056,6 +3291,42 @@ async function handleMessage(msg) {
     "";
 
   if (!text) return;
+
+  // Menús y comandos de bultos.
+  const isPrivateChat = !jid.endsWith("@g.us");
+  const plainText = String(text || "").trim();
+  const plainNorm = norm(plainText).replace(/^!/, "").trim();
+  if (isPrivateChat && /^(?:menu|ayuda)$/.test(plainNorm)) {
+    await send(jid, menu());
+    return;
+  }
+  if (isPrivateChat && /^menu\s+servicios?$/.test(plainNorm)) {
+    await send(jid, menuServicios());
+    return;
+  }
+  if (/^!?menubultos\b/i.test(plainText)) {
+    await send(jid, menuBultos());
+    return;
+  }
+  if (isPrivateChat && /^!?listap(?:\s|$)/i.test(plainText)) {
+    await handleListap(jid, plainText);
+    return;
+  }
+  if (isPrivateChat && /^!?precio(?:\s|$)/i.test(plainText)) {
+    await handlePrice(jid, plainText.replace(/^\s*!?precio\s*/i, ""));
+    return;
+  }
+  if (isPrivateChat && /^!?cuenta\s*$/i.test(plainText)) {
+    await openBulkAccount(jid);
+    return;
+  }
+  if (isPrivateChat && /^!?cerrarcuenta\s*$/i.test(plainText)) {
+    await closeBulkAccount(jid, "manual");
+    return;
+  }
+  if (isPrivateChat && await handleOpenBulkAccountMessage(jid, plainText)) {
+    return;
+  }
 
   // Respuesta a una solicitud de reingreso de usuario de servicios.
   if (jid.endsWith("@g.us")) {
@@ -4017,6 +4288,16 @@ async function handleMessage(msg) {
 
   if (command === "menu") {
     await send(jid, menu());
+    return;
+  }
+
+  if (command === "menu_servicios") {
+    await send(jid, menuServicios());
+    return;
+  }
+
+  if (command === "menubultos") {
+    await send(jid, menuBultos());
     return;
   }
 
