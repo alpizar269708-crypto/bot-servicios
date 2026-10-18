@@ -55,3 +55,17 @@ El primer arranque muestra QR en logs. Si PAIRING_PHONE está configurado, tambi
 En WhatsApp: Ajustes > Dispositivos vinculados > Vincular un dispositivo > Vincular con número de teléfono.
 
 IMPORTANTE: los datos operativos y las credenciales de la sesión de Baileys se guardan en MongoDB. Esto permite que el Worker de Render pueda reiniciarse sin perder la sesión por depender de almacenamiento local.
+
+## Menú de bultos, precios y cuenta temporal
+
+- `menu`: muestra las tres secciones disponibles.
+- `menu servicios`: comandos de servicios y pagos.
+- `menutel`: teléfonos y usuarios.
+- `menubultos`: lista de productos, consulta de precios y cuenta temporal.
+- En mensaje privado, cualquier usuario puede usar `listap` para guardar productos. Envía una línea por producto con formato `CODIGO Descripción $Precio`, por ejemplo:
+  `BC25K Becerra Crecimiento 25 Kilos $245.00`
+  `CAGO25K Caballo el 7 leguas Golden 25 Kilos $305.00`
+  Si se repite un código, se actualiza su descripción y precio.
+- `precio CC25K` o `precio becerra crece`: busca por código o descripción y tolera coincidencias aproximadas.
+- `cuenta`: abre una cuenta temporal en memoria durante un máximo de 10 minutos. Cada producto consultado agrega una unidad y actualiza el total; si hay varias coincidencias, pide elegir por número, código o descripción.
+- `cerrarcuenta`: cierra la cuenta y muestra el detalle y total. Después de cada producto también puedes responder `sí` para cerrar o `no` para continuar. Las cuentas temporales no se guardan en MongoDB.
