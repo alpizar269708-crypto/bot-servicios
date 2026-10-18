@@ -3064,7 +3064,7 @@ async function handlePrice(jid, query) {
     await send(jid, "🔎 No encontré productos para *" + (query || "esa búsqueda") + "*. Prueba con un código o parte de la descripción.");
     return;
   }
-  await send(jid, "💲 *RESULTADOS DE PRECIO*\n\n" + matches.map((p, i) => productLine(p, matches.length > 1 ? i : null)).join("\n"));
+  await send(jid, "💲 *RESULTADOS DE PRECIO*\n\n" + matches.map((p, i) => productLine(p, matches.length > 1 ? i : null)).join("\n\n"));
 }
 
 function bulkAccountSummary(session) {
