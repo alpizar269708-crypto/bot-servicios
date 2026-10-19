@@ -3382,6 +3382,15 @@ async function send(jid, text) {
   }
 
   return result;}
+function unwrapWhatsAppMessage(message) {
+  let current = message;
+  while (current && (current.ephemeralMessage || current.viewOnceMessage || current.viewOnceMessageV2 || current.documentWithCaptionMessage)) {
+    current = current.ephemeralMessage?.message || current.viewOnceMessage?.message ||
+      current.viewOnceMessageV2?.message || current.documentWithCaptionMessage?.message;
+  }
+  return current || {};
+}
+
 async function handleMessage(msg) {
   // No procesar mensajes enviados por el propio bot.
   // Los mensajes escritos manualmente por el usuario desde ese mismo
@@ -3393,10 +3402,11 @@ async function handleMessage(msg) {
 
   const isPrivateChat = !jid.endsWith("@g.us");
 
+  const contentMessage = unwrapWhatsAppMessage(msg.message);
   const text =
-    msg.message?.conversation || msg.message?.extendedTextMessage?.text ||
-    msg.message?.imageMessage?.caption ||
-    msg.message?.videoMessage?.caption ||
+    contentMessage.conversation || contentMessage.extendedTextMessage?.text ||
+    contentMessage.imageMessage?.caption ||
+    contentMessage.videoMessage?.caption ||
     "";
 
   if (!text) return;
