@@ -47,16 +47,13 @@ const {
   initAuthCreds,
   BufferJSON,
   proto,
-  Browsers,
-  downloadContentFromMessage
+  Browsers
 } = require("@whiskeysockets/baileys");
 const { MongoClient } = require("mongodb");
 const pino = require("pino");
 const express = require("express");
 const { useMongoDBAuthState } = require("./mongoAuth");
 const mongoose = require("mongoose");
-const { spawn } = require("node:child_process");
-const ffmpegPath = require("ffmpeg-static");
 
 const MONGO_URI = process.env.MONGO_URI;
 const DB_NAME = process.env.MONGO_DB_NAME || "bot_servicios";
@@ -3151,13 +3148,12 @@ async function closeBulkAccount(jid, reason = "manual", catalog = "main") {
   await send(jid, (reason === "manual" ? "🔒 *CUENTA CERRADA*" : "⏰ *CUENTA CERRADA POR TIEMPO*") + "\n" + bulkAccountSummary(session));
 }
 
-async function addProductToBulkAccount(jid, session, product, quantity = 1, options = {}) {
+async function addProductToBulkAccount(jid, session, product, quantity = 1) {
   quantity = Math.max(1, Math.floor(Number(quantity) || 1));
   const unitPrice = Number(product.price || 0);
   session.items.push({ code: product.code, description: product.description, unitPrice, quantity, price: unitPrice * quantity });
   session.pendingMatches = null;
   session.pendingQuantity = 1;
-  if (options.silent) return;
   const addedProductKey = norm(product.code) + "|" + norm(product.description) + "|" + unitPrice;
   const groupedProductKeys = [...new Set(session.items.map(item =>
     norm(item.code) + "|" + norm(item.description) + "|" + Number(item.unitPrice ?? item.price ?? 0)
@@ -3165,125 +3161,6 @@ async function addProductToBulkAccount(jid, session, product, quantity = 1, opti
   const addedNumber = groupedProductKeys.indexOf(addedProductKey) + 1;
   await send(jid, "✅ Producto agregado al renglón *#" + addedNumber + "*.\n\n" + bulkAccountSummary(session) +
     "\n\n¿Deseas cerrar la cuenta? Responde *sí*");
-}
-
-async function processAudioProductQueue(jid, session) {
-  while (session.audioQueue && session.audioQueue.length) {
-    const item = session.audioQueue.shift();
-    const query = String(item.query || "").trim();
-    const quantity = Math.max(1, Math.floor(Number(item.quantity) || 1));
-    const matches = query ? await findProducts(query, session.catalog) : [];
-    if (!matches.length) {
-      await send(jid, "🎙️ No encontré una coincidencia para *" + (query || "un producto del audio") +
-        "*. Continúo con el siguiente producto; puedes agregar este manualmente después.");
-      continue;
-    }
-    if (matches.length === 1) {
-      await addProductToBulkAccount(jid, session, matches[0], quantity, { silent: true });
-      continue;
-    }
-    session.pendingMatches = matches.slice(0, 10);
-    session.pendingQuantity = quantity;
-    session.audioPending = true;
-    session.audioCurrentQuery = query;
-    await send(jid, "🎙️ *REVISIÓN DE PRODUCTOS DEL AUDIO*\n" +
-      "Producto pendiente: *" + query + "* (" + quantity + " unidades).\n" +
-      "Encontré varias coincidencias. Responde con el número del producto que quieres agregar:\n\n" +
-      session.pendingMatches.map((p, i) => productLine(p, i)).join("\n\n") +
-      "\n\nCuando elijas, revisaré el siguiente producto del audio.");
-    return;
-  }
-  session.audioPending = false;
-  session.audioCurrentQuery = null;
-  await send(jid, "🎙️ *AUDIO PROCESADO*\n\n" + bulkAccountSummary(session) +
-    "\n\n¿Deseas agregar más productos? Responde *no* para seguir o *sí* para cerrar la cuenta.");
-}
-
-async function parseAudioProductList(transcript, defaultCatalog) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error("Falta configurar OPENAI_API_KEY en las variables de entorno de Render.");
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: { "Authorization": "Bearer " + apiKey, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: process.env.AUDIO_PARSER_MODEL || "gpt-4o-mini",
-      temperature: 0,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: "Convierte una transcripción en español mexicano de una lista hablada de productos para una cuenta de bultos a JSON. Devuelve exclusivamente un objeto JSON con la propiedad items, arreglo de {quantity, query}. quantity debe ser entero positivo. query debe contener solo el nombre o descripción del producto, sin cantidad ni conectores. Conserva el orden hablado, no inventes productos y no combines productos distintos. Si no puedes identificar un producto, conserva una consulta textual corta. No incluyas el nombre de la cuenta/catálogo como producto." },
-        { role: "user", content: "Catálogo: " + defaultCatalog + "\nTranscripción: " + transcript }
-      ]
-    })
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data?.error?.message || "No se pudo interpretar la lista del audio.");
-  const parsed = JSON.parse(data?.choices?.[0]?.message?.content || "{}");
-  if (!Array.isArray(parsed.items)) throw new Error("No pude identificar la lista de productos en el audio.");
-  return parsed.items.map(item => ({
-    quantity: Math.max(1, Math.floor(Number(item.quantity) || 1)),
-    query: String(item.query || "").trim()
-  })).filter(item => item.query).slice(0, 40);
-}
-
-function unwrapWhatsAppMessage(message) {
-  let current = message;
-  while (current && (current.ephemeralMessage || current.viewOnceMessage || current.viewOnceMessageV2 || current.documentWithCaptionMessage)) {
-    current = current.ephemeralMessage?.message || current.viewOnceMessage?.message ||
-      current.viewOnceMessageV2?.message || current.documentWithCaptionMessage?.message;
-  }
-  return current || {};
-}
-
-async function convertAudioToMp3(buffer) {
-  return new Promise((resolve, reject) => {
-    const process = spawn(ffmpegPath, [
-      "-hide_banner", "-loglevel", "error", "-i", "pipe:0",
-      "-vn", "-ac", "1", "-ar", "16000", "-f", "mp3", "pipe:1"
-    ]);
-    const output = [];
-    const errors = [];
-    process.stdout.on("data", chunk => output.push(chunk));
-    process.stderr.on("data", chunk => errors.push(chunk));
-    process.on("error", reject);
-    process.on("close", code => {
-      if (code !== 0) {
-        reject(new Error(Buffer.concat(errors).toString("utf8") || "No se pudo convertir el audio."));
-        return;
-      }
-      resolve(Buffer.concat(output));
-    });
-    process.stdin.on("error", reject);
-    process.stdin.end(buffer);
-  });
-}
-
-async function transcribeWhatsAppAudio(message) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error("Falta configurar OPENAI_API_KEY en las variables de entorno de Render.");
-  const content = unwrapWhatsAppMessage(message);
-  const audio = content.audioMessage;
-  if (!audio) return null;
-  const stream = await downloadContentFromMessage(audio, "audio");
-  const chunks = [];
-  for await (const chunk of stream) chunks.push(chunk);
-  const buffer = Buffer.concat(chunks);
-  if (!buffer.length) throw new Error("El audio llegó vacío.");
-  if (buffer.length > 25 * 1024 * 1024) throw new Error("El audio supera el límite de 25 MB.");
-  const mp3Buffer = await convertAudioToMp3(buffer);
-  const form = new FormData();
-  form.append("file", new Blob([mp3Buffer], { type: "audio/mpeg" }), "whatsapp-audio.mp3");
-  form.append("model", process.env.AUDIO_TRANSCRIPTION_MODEL || "gpt-4o-mini-transcribe");
-  form.append("language", "es");
-  const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-    method: "POST",
-    headers: { "Authorization": "Bearer " + apiKey },
-    body: form
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data?.error?.message || "No se pudo transcribir el audio.");
-  const transcript = String(data.text || "").trim();
-  if (!transcript) throw new Error("No pude reconocer palabras en el audio.");
-  return transcript;
 }
 
 async function handleOpenBulkAccountMessage(jid, text, catalog = "main") {
@@ -3320,15 +3197,7 @@ async function handleOpenBulkAccountMessage(jid, text, catalog = "main") {
       await send(jid, "❌ No pude elegir una sola opción. Responde con el número de la lista, el código exacto o una descripción que identifique un solo producto.");
       return true;
     }
-    const chosenQuantity = session.pendingQuantity || 1;
-    if (session.audioPending) {
-      session.pendingMatches = null;
-      session.pendingQuantity = 1;
-      await addProductToBulkAccount(jid, session, chosen, chosenQuantity, { silent: true });
-      await processAudioProductQueue(jid, session);
-    } else {
-      await addProductToBulkAccount(jid, session, chosen, chosenQuantity);
-    }
+    await addProductToBulkAccount(jid, session, chosen, session.pendingQuantity || 1);
     return true;
   }
   // Acepta un multiplicador entero separado del código, antes o después:
@@ -3526,63 +3395,11 @@ async function handleMessage(msg) {
   const jid = msg.key.remoteJid;
   if (!jid) return;
 
-  const contentMessage = unwrapWhatsAppMessage(msg.message);
-  let text =
-    contentMessage.conversation || contentMessage.extendedTextMessage?.text ||
-    contentMessage.imageMessage?.caption ||
-    contentMessage.videoMessage?.caption ||
+  const text =
+    msg.message?.conversation || msg.message?.extendedTextMessage?.text ||
+    msg.message?.imageMessage?.caption ||
+    msg.message?.videoMessage?.caption ||
     "";
-
-  const isPrivateChat = !jid.endsWith("@g.us");
-  if (!text && contentMessage.audioMessage) {
-    let transcript;
-    try {
-      transcript = await transcribeWhatsAppAudio(msg.message);
-    } catch (error) {
-      console.error("❌ Error transcribiendo audio:", error?.message || error);
-      await send(jid, "🎙️ No pude procesar ese audio. " + (process.env.OPENAI_API_KEY
-        ? "Intenta enviarlo otra vez o escribe el comando."
-        : "Falta configurar la clave de transcripción en Render."));
-      return;
-    }
-    await send(jid, "🎙️ *Entendí:* " + transcript);
-    const spoken = transcript.trim();
-    const celiaStart = spoken.match(/^(?:celia|celiat)(?:[\s,:;-]+|$)(.*)$/i);
-    const mainStart = spoken.match(/^(?:bultos|cuenta)(?:[\s,:;-]+|$)(.*)$/i);
-    const accountCatalog = celiaStart ? "celia" : mainStart ? "main" : null;
-    const listText = celiaStart ? celiaStart[1].trim() : mainStart ? mainStart[1].trim() : "";
-    if (isPrivateChat && accountCatalog && listText) {
-      try {
-        await openBulkAccount(jid, accountCatalog);
-        const accountKey = accountCatalog === "celia" ? jid + ":celia" : jid;
-        const session = bulkAccounts.get(accountKey);
-        if (!session) return;
-        const items = await parseAudioProductList(listText, accountCatalog);
-        if (!items.length) {
-          await send(jid, "No pude separar productos y cantidades de ese audio. La cuenta sigue abierta; envía los productos por texto o intenta otro audio.");
-          return;
-        }
-        session.audioQueue = items;
-        session.audioPending = false;
-        await send(jid, "🧾 Identifiqué *" + items.length + "* productos en el audio. Agregaré los que tengan una coincidencia clara y te preguntaré uno por uno cuando haya varias opciones.");
-        await processAudioProductQueue(jid, session);
-        return;
-      } catch (error) {
-        console.error("❌ Error interpretando lista hablada:", error?.message || error);
-        await send(jid, "No pude organizar los productos del audio. La transcripción quedó arriba; puedes repetirla o enviar los productos por texto.");
-        return;
-      }
-    }
-    if (isPrivateChat && /^(?:celia|celiat)$/i.test(spoken)) {
-      await openBulkAccount(jid, "celia");
-      return;
-    }
-    if (isPrivateChat && /^(?:bultos|cuenta)$/i.test(spoken)) {
-      await openBulkAccount(jid, "main");
-      return;
-    }
-    text = transcript;
-  }
 
   if (!text) return;
 
