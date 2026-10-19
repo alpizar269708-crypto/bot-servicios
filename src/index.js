@@ -3136,7 +3136,7 @@ async function openBulkAccount(jid, catalog = "main") {
     await send(jid, "⏰ La cuenta se cerró automáticamente al cumplir 10 minutos.\n" + bulkAccountSummary(session));
   }, BULK_ACCOUNT_TTL_MS);
   if (session.timer && typeof session.timer.unref === "function") session.timer.unref();
-  await send(jid, (catalog === "celia" ? "Cuenta de Celia abierta." : "Cuenta abierta.") + " Durará máximo *10 minutos* y no se guardará como cuenta permanente.\n\nEnvía el código o descripción del producto. Puedes indicar una cantidad antes o después del código, por ejemplo *CC 25* o *25 CC*.\nSi hay varios productos que coinciden, primero te preguntaré cuál es.\nEscribe *" + (catalog === "celia" ? "cerrarceliat" : "cerrarcuenta") + "* para terminar.");
+  await send(jid, "Cuenta abierta.\n\nEnvía el código o descripción del producto, por ejemplo *CC 25* o *25 CC*.\n\nEscribe *cerrarcuenta* para terminar.");
 }
 
 async function closeBulkAccount(jid, reason = "manual", catalog = "main") {
@@ -3154,10 +3154,10 @@ async function addProductToBulkAccount(jid, session, product, quantity = 1) {
   session.items.push({ code: product.code, description: product.description, unitPrice, quantity, price: unitPrice * quantity });
   session.pendingMatches = null;
   session.pendingQuantity = 1;
-  const addedLine = "🌾 " + product.description + "\n" +
+  const addedLine = "📦 " + product.description + "\n" +
     (quantity > 1 ? "   " + quantity + " × " + money(unitPrice) + " = *" + money(unitPrice * quantity) + "*" : "   *" + money(unitPrice) + "*");
   await send(jid, "✅ Agregado:\n" + addedLine + "\n\n" + bulkAccountSummary(session) +
-    "\n\n¿Deseas cerrar la cuenta? Responde *sí* para cerrarla o *no* para seguir agregando.");
+    "\n\n¿Deseas cerrar la cuenta? Responde *sí*");
 }
 
 async function handleOpenBulkAccountMessage(jid, text, catalog = "main") {
@@ -3166,8 +3166,8 @@ async function handleOpenBulkAccountMessage(jid, text, catalog = "main") {
   if (!session) return false;
   if (Date.now() >= session.expiresAt) { await closeBulkAccount(jid, "timeout", catalog); return true; }
   const t = norm(text).replace(/[.!¡¿?]/g, "").trim();
-  if (/^(?:cerrarcuenta|cerrar cuenta)$/.test(t)) { await closeBulkAccount(jid, "manual"); return true; }
-  if (/^(?:si|s)$/.test(t)) { await closeBulkAccount(jid, "manual"); return true; }
+  if (/^(?:cerrarcuenta|cerrar cuenta|cerrarceliat)$/.test(t)) { await closeBulkAccount(jid, "manual", catalog); return true; }
+  if (/^(?:si|s)$/.test(t)) { await closeBulkAccount(jid, "manual", catalog); return true; }
   if (/^(?:no|seguir|continua|continuar)$/.test(t)) {
     session.pendingMatches = null;
     session.pendingQuantity = 1;
