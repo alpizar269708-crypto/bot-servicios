@@ -3154,14 +3154,30 @@ async function handleOpenBulkAccountMessage(jid, text) {
     await addProductToBulkAccount(jid, session, chosen, session.pendingQuantity || 1);
     return true;
   }
-  const matches = await findProducts(text);
+  // Acepta un multiplicador entero separado del código, antes o después:
+  // "CC 25" y "25 CC". Los números pegados al código, como "CC25K", no cuentan.
+  let query = text.trim();
+  let quantity = 1;
+  const quantityBefore = query.match(/^(\d+)\s+(.+)$/);
+  const quantityAfter = query.match(/^(.+?)\s+(\d+)$/);
+  if (quantityBefore && Number(quantityBefore[1]) > 0) {
+    quantity = Math.floor(Number(quantityBefore[1]));
+    query = quantityBefore[2].trim();
+  } else if (quantityAfter && Number(quantityAfter[2]) > 0) {
+    quantity = Math.floor(Number(quantityAfter[2]));
+    query = quantityAfter[1].trim();
+  }
+  const matches = await findProducts(query);
   if (!matches.length) {
     await send(jid, "🔎 No encontré ese producto. Prueba con su código o parte de la descripción; la cuenta sigue abierta.");
     return true;
   }
-  if (matches.length === 1) { await addProductToBulkAccount(jid, session, matches[0]); return true; }
+  if (matches.length === 1) { await addProductToBulkAccount(jid, session, matches[0], quantity); return true; }
   session.pendingMatches = matches.slice(0, 10);
-  await send(jid, "🔎 Encontré varias coincidencias. Responde con el número, código o descripción de la que quieres sumar:\n\n" +
+  session.pendingQuantity = quantity;
+  await send(jid, "🔎 Encontré varias coincidencias para *" + query + "*." +
+    (quantity > 1 ? "\nCantidad solicitada: *" + quantity + "* unidades." : "") +
+    "\nPrimero elige cuál producto quieres agregar; después aplicaré la cantidad. Responde con el número, código o descripción:\n\n" +
     session.pendingMatches.map((p, i) => productLine(p, i)).join("\n\n"));
   return true;
 }
