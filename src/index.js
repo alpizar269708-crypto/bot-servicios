@@ -2963,12 +2963,16 @@ function parseProductLines(raw) {
   return { rows, invalid };
 }
 
-async function handleListap(jid, fullText) {
-  const payload = String(fullText || "").replace(/^\s*!?listap\b\s*/i, "").trim();
-  const { products } = await collections();
+function productCollection(catalog = "main") {
+  return db.collection(COLLECTION + (catalog === "celia" ? "_products_celiat" : "_products"));
+}
+
+async function handleListap(jid, fullText, catalog = "main") {
+  const payload = String(fullText || "").replace(/^\s*!?listap(?:\s+celiat)?\b\s*/i, "").trim();
+  const products = productCollection(catalog);
   if (!payload) {
     const count = await products.countDocuments({});
-    await send(jid, "🌾 *LISTA DE PRODUCTOS*\nProductos guardados: *" + count + "*\n\nEnvía *listap* y debajo una línea por producto:\nCODIGO Descripción del producto $Precio\n\nEjemplo:\nBC25K Becerra Crecimiento 25 Kilos $245.00");
+    await send(jid, (catalog === "celia" ? "🌾 *LISTA DE CELIA*" : "🌾 *LISTA DE PRODUCTOS*") + "\nProductos guardados: *" + count + "*\n\nEnvía *" + (catalog === "celia" ? "listap celiat" : "listap") + "* y debajo una línea por producto:\nCODIGO Descripción del producto $Precio\n\nEjemplo:\nBC25K Becerra Crecimiento 25 Kilos $245.00");
     return;
   }
   const parsed = parseProductLines(payload);
@@ -2985,13 +2989,34 @@ async function handleListap(jid, fullText) {
     }
   }));
   const result = await products.bulkWrite(operations, { ordered: false });
-  let response = "✅ *LISTA GUARDADA*\n📦 Leídas: *" + parsed.rows.length + "*\n➕ Nuevas: *" + Number(result.upsertedCount || 0) + "*\n🔄 Actualizadas: *" + Number(result.modifiedCount || 0) + "*";
+  let response = "✅ *" + (catalog === "celia" ? "LISTA DE CELIA GUARDADA" : "LISTA GUARDADA") + "*\n📦 Leídas: *" + parsed.rows.length + "*\n➕ Nuevas: *" + Number(result.upsertedCount || 0) + "*\n🔄 Actualizadas: *" + Number(result.modifiedCount || 0) + "*";
   if (parsed.invalid.length) {
     response += "\n⚠️ Líneas omitidas: " + parsed.invalid.length + "\n" +
       parsed.invalid.slice(0, 8).map(x => "Línea " + x.line + ": " + x.text.slice(0, 90)).join("\n");
     if (parsed.invalid.length > 8) response += "\n…y " + (parsed.invalid.length - 8) + " más.";
   }
   await send(jid, response);
+}
+
+async function showProductList(jid, catalog = "main") {
+  const products = productCollection(catalog);
+  const rows = await products.find({}).sort({ code: 1 }).limit(5000).toArray();
+  const title = catalog === "celia" ? "🌾 *LISTA DE CELIA*" : "🌾 *LISTA COMPLETA DE PRODUCTOS*";
+  if (!rows.length) {
+    await send(jid, title + "\n\nLa lista está vacía. Agrega productos con *" + (catalog === "celia" ? "listap celiat" : "listap") + "*.");
+    return;
+  }
+  const lines = rows.map((p, i) => (i + 1) + ". 🌾 *" + p.code + "*\n   " + p.description + "\n   *" + money(Number(p.price || 0)) + "*");
+  const header = title + "\nProductos: *" + rows.length + "*\n\n";
+  let chunk = header;
+  for (const line of lines) {
+    if (chunk.length + line.length + 2 > 3500) {
+      await send(jid, chunk);
+      chunk = title + " (continuación)\n\n";
+    }
+    chunk += line + "\n\n";
+  }
+  if (chunk.trim()) await send(jid, chunk.trim());
 }
 
 function levenshteinDistance(a, b) {
@@ -3035,8 +3060,8 @@ function productMatchScore(query, product) {
   return 0;
 }
 
-async function findProducts(query) {
-  const { products } = await collections();
+async function findProducts(query, catalog = "main") {
+  const products = productCollection(catalog);
   const q = norm(query);
   if (!q) return [];
   const all = await products.find({}).limit(5000).toArray();
@@ -3058,8 +3083,8 @@ function productLine(p, index = null) {
     "   *" + money(Number(p.price || 0)) + "*";
 }
 
-async function handlePrice(jid, query) {
-  const matches = await findProducts(query);
+async function handlePrice(jid, query, catalog = "main") {
+  const matches = await findProducts(query, catalog);
   if (!matches.length) {
     await send(jid, "🔎 No encontré productos para *" + (query || "esa búsqueda") + "*. Prueba con un código o parte de la descripción.");
     return;
@@ -3095,29 +3120,31 @@ function bulkAccountSummary(session) {
     "💰 *TOTAL: " + money(total) + "*";
 }
 
-async function openBulkAccount(jid) {
-  const existing = bulkAccounts.get(jid);
+async function openBulkAccount(jid, catalog = "main") {
+  const accountKey = catalog === "celia" ? jid + ":celia" : jid;
+  const existing = bulkAccounts.get(accountKey);
   if (existing && Date.now() < existing.expiresAt) {
     await send(jid, "Ya hay una cuenta abierta.\n" + bulkAccountSummary(existing) + "\n\nEnvía un código o descripción, o *cerrarcuenta*.");
     return;
   }
-  if (existing) { clearTimeout(existing.timer); bulkAccounts.delete(jid); }
-  const session = { items: [], pendingMatches: null, pendingQuantity: 1, startedAt: Date.now(), expiresAt: Date.now() + BULK_ACCOUNT_TTL_MS, timer: null };
-  bulkAccounts.set(jid, session);
+  if (existing) { clearTimeout(existing.timer); bulkAccounts.delete(accountKey); }
+  const session = { items: [], pendingMatches: null, pendingQuantity: 1, catalog, accountKey, startedAt: Date.now(), expiresAt: Date.now() + BULK_ACCOUNT_TTL_MS, timer: null };
+  bulkAccounts.set(accountKey, session);
   session.timer = setTimeout(async () => {
-    if (bulkAccounts.get(jid) !== session) return;
-    bulkAccounts.delete(jid);
+    if (bulkAccounts.get(accountKey) !== session) return;
+    bulkAccounts.delete(accountKey);
     await send(jid, "⏰ La cuenta se cerró automáticamente al cumplir 10 minutos.\n" + bulkAccountSummary(session));
   }, BULK_ACCOUNT_TTL_MS);
   if (session.timer && typeof session.timer.unref === "function") session.timer.unref();
-  await send(jid, "Cuenta abierta. Durará máximo *10 minutos* y no se guardará como cuenta permanente.\n\nEnvía el código o descripción del producto. Puedes indicar una cantidad antes o después del código, por ejemplo *CC 25* o *25 CC*.\nSi hay varios productos que coinciden, primero te preguntaré cuál es.\nEscribe *cerrarcuenta* para terminar.");
+  await send(jid, (catalog === "celia" ? "Cuenta de Celia abierta." : "Cuenta abierta.") + " Durará máximo *10 minutos* y no se guardará como cuenta permanente.\n\nEnvía el código o descripción del producto. Puedes indicar una cantidad antes o después del código, por ejemplo *CC 25* o *25 CC*.\nSi hay varios productos que coinciden, primero te preguntaré cuál es.\nEscribe *" + (catalog === "celia" ? "cerrarceliat" : "cerrarcuenta") + "* para terminar.");
 }
 
-async function closeBulkAccount(jid, reason = "manual") {
-  const session = bulkAccounts.get(jid);
+async function closeBulkAccount(jid, reason = "manual", catalog = "main") {
+  const accountKey = catalog === "celia" ? jid + ":celia" : jid;
+  const session = bulkAccounts.get(accountKey);
   if (!session) { await send(jid, "ℹ️ No tienes una cuenta abierta."); return; }
   clearTimeout(session.timer);
-  bulkAccounts.delete(jid);
+  bulkAccounts.delete(accountKey);
   await send(jid, (reason === "manual" ? "🔒 *CUENTA CERRADA*" : "⏰ *CUENTA CERRADA POR TIEMPO*") + "\n" + bulkAccountSummary(session));
 }
 
@@ -3133,10 +3160,11 @@ async function addProductToBulkAccount(jid, session, product, quantity = 1) {
     "\n\n¿Deseas cerrar la cuenta? Responde *sí* para cerrarla o *no* para seguir agregando.");
 }
 
-async function handleOpenBulkAccountMessage(jid, text) {
-  const session = bulkAccounts.get(jid);
+async function handleOpenBulkAccountMessage(jid, text, catalog = "main") {
+  const accountKey = catalog === "celia" ? jid + ":celia" : jid;
+  const session = bulkAccounts.get(accountKey);
   if (!session) return false;
-  if (Date.now() >= session.expiresAt) { await closeBulkAccount(jid, "timeout"); return true; }
+  if (Date.now() >= session.expiresAt) { await closeBulkAccount(jid, "timeout", catalog); return true; }
   const t = norm(text).replace(/[.!¡¿?]/g, "").trim();
   if (/^(?:cerrarcuenta|cerrar cuenta)$/.test(t)) { await closeBulkAccount(jid, "manual"); return true; }
   if (/^(?:si|s)$/.test(t)) { await closeBulkAccount(jid, "manual"); return true; }
@@ -3178,7 +3206,7 @@ async function handleOpenBulkAccountMessage(jid, text) {
     quantity = Math.floor(Number(quantityAfter[2]));
     query = quantityAfter[1].trim();
   }
-  const matches = await findProducts(query);
+  const matches = await findProducts(query, catalog);
   if (!matches.length) {
     await send(jid, "🔎 No encontré ese producto. Prueba con su código o parte de la descripción; la cuenta sigue abierta.");
     return true;
