@@ -3391,6 +3391,8 @@ async function handleMessage(msg) {
   const jid = msg.key.remoteJid;
   if (!jid) return;
 
+  const isPrivateChat = !jid.endsWith("@g.us");
+
   const text =
     msg.message?.conversation || msg.message?.extendedTextMessage?.text ||
     msg.message?.imageMessage?.caption ||
