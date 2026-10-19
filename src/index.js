@@ -3298,7 +3298,15 @@ async function handleOpenBulkAccountMessage(jid, text, catalog = "main") {
       await send(jid, "❌ No pude elegir una sola opción. Responde con el número de la lista, el código exacto o una descripción que identifique un solo producto.");
       return true;
     }
-    await addProductToBulkAccount(jid, session, chosen, session.pendingQuantity || 1);
+    const chosenQuantity = session.pendingQuantity || 1;
+    if (session.audioPending) {
+      session.pendingMatches = null;
+      session.pendingQuantity = 1;
+      await addProductToBulkAccount(jid, session, chosen, chosenQuantity, { silent: true });
+      await processAudioProductQueue(jid, session);
+    } else {
+      await addProductToBulkAccount(jid, session, chosen, chosenQuantity);
+    }
     return true;
   }
   // Acepta un multiplicador entero separado del código, antes o después:
@@ -3496,16 +3504,68 @@ async function handleMessage(msg) {
   const jid = msg.key.remoteJid;
   if (!jid) return;
 
-  const text =
-    msg.message?.conversation ||    msg.message?.extendedTextMessage?.text ||
-    msg.message?.imageMessage?.caption ||
-    msg.message?.videoMessage?.caption ||
+  const contentMessage = unwrapWhatsAppMessage(msg.message);
+  let text =
+    contentMessage.conversation || contentMessage.extendedTextMessage?.text ||
+    contentMessage.imageMessage?.caption ||
+    contentMessage.videoMessage?.caption ||
     "";
+
+  const isPrivateChat = !jid.endsWith("@g.us");
+  if (!text && contentMessage.audioMessage) {
+    if (!isPrivateChat) return;
+    let transcript;
+    try {
+      transcript = await transcribeWhatsAppAudio(msg.message);
+    } catch (error) {
+      console.error("❌ Error transcribiendo audio:", error?.message || error);
+      await send(jid, "🎙️ No pude procesar ese audio. " + (process.env.OPENAI_API_KEY
+        ? "Intenta enviarlo otra vez o escribe el comando."
+        : "Falta configurar la clave de transcripción en Render."));
+      return;
+    }
+    await send(jid, "🎙️ *Entendí:* " + transcript);
+    const spoken = transcript.trim();
+    const celiaStart = spoken.match(/^(?:celia|celiat)(?:[\s,:;-]+|$)(.*)$/i);
+    const mainStart = spoken.match(/^(?:bultos|cuenta)(?:[\s,:;-]+|$)(.*)$/i);
+    const accountCatalog = celiaStart ? "celia" : mainStart ? "main" : null;
+    const listText = celiaStart ? celiaStart[1].trim() : mainStart ? mainStart[1].trim() : "";
+    if (accountCatalog && listText) {
+      try {
+        await openBulkAccount(jid, accountCatalog);
+        const accountKey = accountCatalog === "celia" ? jid + ":celia" : jid;
+        const session = bulkAccounts.get(accountKey);
+        if (!session) return;
+        const items = await parseAudioProductList(listText, accountCatalog);
+        if (!items.length) {
+          await send(jid, "No pude separar productos y cantidades de ese audio. La cuenta sigue abierta; envía los productos por texto o intenta otro audio.");
+          return;
+        }
+        session.audioQueue = items;
+        session.audioPending = false;
+        await send(jid, "🧾 Identifiqué *" + items.length + "* productos en el audio. Agregaré los que tengan una coincidencia clara y te preguntaré uno por uno cuando haya varias opciones.");
+        await processAudioProductQueue(jid, session);
+        return;
+      } catch (error) {
+        console.error("❌ Error interpretando lista hablada:", error?.message || error);
+        await send(jid, "No pude organizar los productos del audio. La transcripción quedó arriba; puedes repetirla o enviar los productos por texto.");
+        return;
+      }
+    }
+    if (/^(?:celia|celiat)$/i.test(spoken)) {
+      await openBulkAccount(jid, "celia");
+      return;
+    }
+    if (/^(?:bultos|cuenta)$/i.test(spoken)) {
+      await openBulkAccount(jid, "main");
+      return;
+    }
+    text = transcript;
+  }
 
   if (!text) return;
 
   // Menús y comandos de bultos.
-  const isPrivateChat = !jid.endsWith("@g.us");
   const plainText = String(text || "").trim();
   const plainNorm = norm(plainText).replace(/^!/, "").trim();
   if (isPrivateChat && /^(?:menu|ayuda)$/.test(plainNorm)) {
