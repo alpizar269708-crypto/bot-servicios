@@ -55,6 +55,8 @@ const pino = require("pino");
 const express = require("express");
 const { useMongoDBAuthState } = require("./mongoAuth");
 const mongoose = require("mongoose");
+const { spawn } = require("node:child_process");
+const ffmpegPath = require("ffmpeg-static");
 
 const MONGO_URI = process.env.MONGO_URI;
 const DB_NAME = process.env.MONGO_DB_NAME || "bot_servicios";
@@ -3232,6 +3234,29 @@ function unwrapWhatsAppMessage(message) {
   return current || {};
 }
 
+async function convertAudioToMp3(buffer) {
+  return new Promise((resolve, reject) => {
+    const process = spawn(ffmpegPath, [
+      "-hide_banner", "-loglevel", "error", "-i", "pipe:0",
+      "-vn", "-ac", "1", "-ar", "16000", "-f", "mp3", "pipe:1"
+    ]);
+    const output = [];
+    const errors = [];
+    process.stdout.on("data", chunk => output.push(chunk));
+    process.stderr.on("data", chunk => errors.push(chunk));
+    process.on("error", reject);
+    process.on("close", code => {
+      if (code !== 0) {
+        reject(new Error(Buffer.concat(errors).toString("utf8") || "No se pudo convertir el audio."));
+        return;
+      }
+      resolve(Buffer.concat(output));
+    });
+    process.stdin.on("error", reject);
+    process.stdin.end(buffer);
+  });
+}
+
 async function transcribeWhatsAppAudio(message) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("Falta configurar OPENAI_API_KEY en las variables de entorno de Render.");
@@ -3244,12 +3269,9 @@ async function transcribeWhatsAppAudio(message) {
   const buffer = Buffer.concat(chunks);
   if (!buffer.length) throw new Error("El audio llegó vacío.");
   if (buffer.length > 25 * 1024 * 1024) throw new Error("El audio supera el límite de 25 MB.");
-  const mime = String(audio.mimetype || "audio/ogg").split(";")[0].toLowerCase();
-  const extension = mime.includes("webm") ? "webm" : mime.includes("mp4") ? "m4a" :
-    mime.includes("mpeg") || mime.includes("mp3") ? "mp3" : mime.includes("wav") ? "wav" :
-    mime.includes("ogg") ? "ogg" : "bin";
+  const mp3Buffer = await convertAudioToMp3(buffer);
   const form = new FormData();
-  form.append("file", new Blob([buffer], { type: mime }), "whatsapp-audio." + extension);
+  form.append("file", new Blob([mp3Buffer], { type: "audio/mpeg" }), "whatsapp-audio.mp3");
   form.append("model", process.env.AUDIO_TRANSCRIPTION_MODEL || "gpt-4o-mini-transcribe");
   form.append("language", "es");
   const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
