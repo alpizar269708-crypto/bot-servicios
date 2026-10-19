@@ -3535,7 +3535,6 @@ async function handleMessage(msg) {
 
   const isPrivateChat = !jid.endsWith("@g.us");
   if (!text && contentMessage.audioMessage) {
-    if (!isPrivateChat) return;
     let transcript;
     try {
       transcript = await transcribeWhatsAppAudio(msg.message);
@@ -3552,7 +3551,7 @@ async function handleMessage(msg) {
     const mainStart = spoken.match(/^(?:bultos|cuenta)(?:[\s,:;-]+|$)(.*)$/i);
     const accountCatalog = celiaStart ? "celia" : mainStart ? "main" : null;
     const listText = celiaStart ? celiaStart[1].trim() : mainStart ? mainStart[1].trim() : "";
-    if (accountCatalog && listText) {
+    if (isPrivateChat && accountCatalog && listText) {
       try {
         await openBulkAccount(jid, accountCatalog);
         const accountKey = accountCatalog === "celia" ? jid + ":celia" : jid;
@@ -3574,11 +3573,11 @@ async function handleMessage(msg) {
         return;
       }
     }
-    if (/^(?:celia|celiat)$/i.test(spoken)) {
+    if (isPrivateChat && /^(?:celia|celiat)$/i.test(spoken)) {
       await openBulkAccount(jid, "celia");
       return;
     }
-    if (/^(?:bultos|cuenta)$/i.test(spoken)) {
+    if (isPrivateChat && /^(?:bultos|cuenta)$/i.test(spoken)) {
       await openBulkAccount(jid, "main");
       return;
     }
