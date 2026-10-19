@@ -3068,14 +3068,20 @@ async function handlePrice(jid, query) {
 }
 
 function bulkAccountSummary(session) {
-  const rows = session.items.map((item, i) =>
-    (i + 1) + ". 🌾 *" + item.code + "*\n" +
-    "   " + item.description + "\n" +
-    "   *" + money(Number(item.price || 0)) + "*"
-  ).join("\n\n");
+  const rows = session.items.map((item, i) => {
+    const quantity = Math.max(1, Number(item.quantity || 1));
+    const unitPrice = Number(item.unitPrice ?? item.price ?? 0);
+    const lineTotal = unitPrice * quantity;
+    return (i + 1) + ". 🌾 *" + item.code + "*" +
+      (quantity > 1 ? " × *" + quantity + "*" : "") + "\n" +
+      "   " + item.description + "\n" +
+      (quantity > 1 ? "   " + quantity + " × " + money(unitPrice) + " = *" + money(lineTotal) + "*" : "   *" + money(lineTotal) + "*");
+  }).join("\n\n");
+  const totalUnits = session.items.reduce((sum, item) => sum + Math.max(1, Number(item.quantity || 1)), 0);
+  const total = session.items.reduce((sum, item) => sum + Number(item.unitPrice ?? item.price ?? 0) * Math.max(1, Number(item.quantity || 1)), 0);
   return "🧾 *CUENTA TEMPORAL*\n\n" + (rows ? rows + "\n\n" : "Todavía no agregas productos.\n\n") +
-    "🔢 Productos agregados: *" + session.items.length + "*\n" +
-    "💰 *TOTAL: " + money(session.items.reduce((sum, x) => sum + Number(x.price || 0), 0)) + "*";
+    "🔢 Renglones: *" + session.items.length + "* · Unidades: *" + totalUnits + "*\n" +
+    "💰 *TOTAL: " + money(total) + "*";
 }
 
 async function openBulkAccount(jid) {
