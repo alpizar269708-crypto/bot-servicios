@@ -3108,7 +3108,7 @@ function bulkAccountSummary(session) {
   }
   const products = [...grouped.values()];
   const rows = products.map((item, i) =>
-    (i + 1) + ". 🌾 " + item.description + "\n" +
+    (i + 1) + ". 📦 " + item.description + "\n" +
     (item.quantity > 1
       ? "   " + item.quantity + " × " + money(item.unitPrice) + " = *" + money(item.total) + "*"
       : "   *" + money(item.total) + "*")
@@ -3154,9 +3154,12 @@ async function addProductToBulkAccount(jid, session, product, quantity = 1) {
   session.items.push({ code: product.code, description: product.description, unitPrice, quantity, price: unitPrice * quantity });
   session.pendingMatches = null;
   session.pendingQuantity = 1;
-  const addedLine = "📦 " + product.description + "\n" +
-    (quantity > 1 ? "   " + quantity + " × " + money(unitPrice) + " = *" + money(unitPrice * quantity) + "*" : "   *" + money(unitPrice) + "*");
-  await send(jid, "✅ Agregado:\n" + addedLine + "\n\n" + bulkAccountSummary(session) +
+  const addedProductKey = norm(product.code) + "|" + norm(product.description) + "|" + unitPrice;
+  const groupedProductKeys = [...new Set(session.items.map(item =>
+    norm(item.code) + "|" + norm(item.description) + "|" + Number(item.unitPrice ?? item.price ?? 0)
+  ))];
+  const addedNumber = groupedProductKeys.indexOf(addedProductKey) + 1;
+  await send(jid, "✅ Producto agregado al renglón *#" + addedNumber + "*.\n\n" + bulkAccountSummary(session) +
     "\n\n¿Deseas cerrar la cuenta? Responde *sí*");
 }
 
