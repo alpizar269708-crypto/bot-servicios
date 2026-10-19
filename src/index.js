@@ -3068,26 +3068,37 @@ async function handlePrice(jid, query) {
 }
 
 function bulkAccountSummary(session) {
-  const rows = session.items.map((item, i) => {
+  // Agrupa productos iguales para que la cuenta sea compacta y fácil de revisar.
+  const grouped = new Map();
+  for (const item of session.items) {
     const quantity = Math.max(1, Number(item.quantity || 1));
     const unitPrice = Number(item.unitPrice ?? item.price ?? 0);
-    const lineTotal = unitPrice * quantity;
-    return (i + 1) + ". 🌾 *" + item.code + "*" +
-      (quantity > 1 ? " × *" + quantity + "*" : "") + "\n" +
-      "   " + item.description + "\n" +
-      (quantity > 1 ? "   " + quantity + " × " + money(unitPrice) + " = *" + money(lineTotal) + "*" : "   *" + money(lineTotal) + "*");
-  }).join("\n\n");
-  const totalUnits = session.items.reduce((sum, item) => sum + Math.max(1, Number(item.quantity || 1)), 0);
-  const total = session.items.reduce((sum, item) => sum + Number(item.unitPrice ?? item.price ?? 0) * Math.max(1, Number(item.quantity || 1)), 0);
-  return "🧾 *CUENTA TEMPORAL*\n\n" + (rows ? rows + "\n\n" : "Todavía no agregas productos.\n\n") +
-    "🔢 Renglones: *" + session.items.length + "* · Unidades: *" + totalUnits + "*\n" +
+    const key = norm(item.code) + "|" + norm(item.description) + "|" + unitPrice;
+    if (!grouped.has(key)) {
+      grouped.set(key, { description: item.description, unitPrice, quantity: 0, total: 0 });
+    }
+    const group = grouped.get(key);
+    group.quantity += quantity;
+    group.total += unitPrice * quantity;
+  }
+  const products = [...grouped.values()];
+  const rows = products.map((item, i) =>
+    (i + 1) + ". 🌾 " + item.description + "\n" +
+    (item.quantity > 1
+      ? "   " + item.quantity + " × " + money(item.unitPrice) + " = *" + money(item.total) + "*"
+      : "   *" + money(item.total) + "*")
+  ).join("\n\n");
+  const totalUnits = products.reduce((sum, item) => sum + item.quantity, 0);
+  const total = products.reduce((sum, item) => sum + item.total, 0);
+  return (rows ? rows + "\n\n" : "Todavía no agregas productos.\n\n") +
+    "🔢 Renglones: *" + products.length + "* · Unidades: *" + totalUnits + "*\n" +
     "💰 *TOTAL: " + money(total) + "*";
 }
 
 async function openBulkAccount(jid) {
   const existing = bulkAccounts.get(jid);
   if (existing && Date.now() < existing.expiresAt) {
-    await send(jid, "🧾 Ya hay una cuenta temporal abierta.\n" + bulkAccountSummary(existing) + "\n\nEnvía un código o descripción, o *cerrarcuenta*.");
+    await send(jid, "Ya hay una cuenta abierta.\n" + bulkAccountSummary(existing) + "\n\nEnvía un código o descripción, o *cerrarcuenta*.");
     return;
   }
   if (existing) { clearTimeout(existing.timer); bulkAccounts.delete(jid); }
@@ -3096,10 +3107,10 @@ async function openBulkAccount(jid) {
   session.timer = setTimeout(async () => {
     if (bulkAccounts.get(jid) !== session) return;
     bulkAccounts.delete(jid);
-    await send(jid, "⏰ La cuenta temporal se cerró automáticamente al cumplir 10 minutos.\n" + bulkAccountSummary(session));
+    await send(jid, "⏰ La cuenta se cerró automáticamente al cumplir 10 minutos.\n" + bulkAccountSummary(session));
   }, BULK_ACCOUNT_TTL_MS);
   if (session.timer && typeof session.timer.unref === "function") session.timer.unref();
-  await send(jid, "🧾 *CUENTA TEMPORAL ABIERTA*\nDurará máximo *10 minutos* y no se guardará como cuenta permanente.\n\nEnvía el código o descripción del producto. Puedes indicar una cantidad antes o después del código, por ejemplo *CC 25* o *25 CC*.\nSi hay varios productos que coinciden, primero te preguntaré cuál es.\nEscribe *cerrarcuenta* para terminar.");
+  await send(jid, "Cuenta abierta. Durará máximo *10 minutos* y no se guardará como cuenta permanente.\n\nEnvía el código o descripción del producto. Puedes indicar una cantidad antes o después del código, por ejemplo *CC 25* o *25 CC*.\nSi hay varios productos que coinciden, primero te preguntaré cuál es.\nEscribe *cerrarcuenta* para terminar.");
 }
 
 async function closeBulkAccount(jid, reason = "manual") {
