@@ -3172,6 +3172,10 @@ async function handleOpenBulkAccountMessage(jid, text, catalog = "main") {
   if (/^(?:cerrarcuenta|cerrar cuenta|cerrarceliat)$/.test(t)) { await closeBulkAccount(jid, "manual", catalog); return true; }
   if (/^(?:si|s)$/.test(t)) { await closeBulkAccount(jid, "manual", catalog); return true; }
   if (/^(?:no|seguir|continua|continuar)$/.test(t)) {
+    if (session.audioPending && session.pendingMatches) {
+      await send(jid, "🎙️ Primero necesito que elijas el producto pendiente del audio. Responde con el número de la lista.");
+      return true;
+    }
     session.pendingMatches = null;
     session.pendingQuantity = 1;
     await send(jid, "👌 Seguimos. Envía el siguiente código o descripción.");
