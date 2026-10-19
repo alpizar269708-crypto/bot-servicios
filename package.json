@@ -9,7 +9,6 @@
   "dependencies": {
     "@whiskeysockets/baileys": "6.7.24",
     "dotenv": "^16.6.1",
-    "ffmpeg-static": "^5.2.0",
     "express": "^5.1.0",
     "mongodb": "^6.19.0",
     "mongoose": "^9.10.1",
