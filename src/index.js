@@ -3091,7 +3091,7 @@ async function openBulkAccount(jid) {
     return;
   }
   if (existing) { clearTimeout(existing.timer); bulkAccounts.delete(jid); }
-  const session = { items: [], pendingMatches: null, startedAt: Date.now(), expiresAt: Date.now() + BULK_ACCOUNT_TTL_MS, timer: null };
+  const session = { items: [], pendingMatches: null, pendingQuantity: 1, startedAt: Date.now(), expiresAt: Date.now() + BULK_ACCOUNT_TTL_MS, timer: null };
   bulkAccounts.set(jid, session);
   session.timer = setTimeout(async () => {
     if (bulkAccounts.get(jid) !== session) return;
@@ -3099,7 +3099,7 @@ async function openBulkAccount(jid) {
     await send(jid, "⏰ La cuenta temporal se cerró automáticamente al cumplir 10 minutos.\n" + bulkAccountSummary(session));
   }, BULK_ACCOUNT_TTL_MS);
   if (session.timer && typeof session.timer.unref === "function") session.timer.unref();
-  await send(jid, "🧾 *CUENTA TEMPORAL ABIERTA*\nDurará máximo *10 minutos* y no se guardará como cuenta permanente.\n\nEnvía el código o descripción de cada producto. Cada consulta agregará una unidad.\nEscribe *cerrarcuenta* para terminar.");
+  await send(jid, "🧾 *CUENTA TEMPORAL ABIERTA*\nDurará máximo *10 minutos* y no se guardará como cuenta permanente.\n\nEnvía el código o descripción del producto. Puedes indicar una cantidad antes o después del código, por ejemplo *CC 25* o *25 CC*.\nSi hay varios productos que coinciden, primero te preguntaré cuál es.\nEscribe *cerrarcuenta* para terminar.");
 }
 
 async function closeBulkAccount(jid, reason = "manual") {
@@ -3110,10 +3110,15 @@ async function closeBulkAccount(jid, reason = "manual") {
   await send(jid, (reason === "manual" ? "🔒 *CUENTA CERRADA*" : "⏰ *CUENTA CERRADA POR TIEMPO*") + "\n" + bulkAccountSummary(session));
 }
 
-async function addProductToBulkAccount(jid, session, product) {
-  session.items.push({ code: product.code, description: product.description, price: Number(product.price || 0) });
+async function addProductToBulkAccount(jid, session, product, quantity = 1) {
+  quantity = Math.max(1, Math.floor(Number(quantity) || 1));
+  const unitPrice = Number(product.price || 0);
+  session.items.push({ code: product.code, description: product.description, unitPrice, quantity, price: unitPrice * quantity });
   session.pendingMatches = null;
-  await send(jid, "✅ Agregado: " + productLine(product) + "\n\n" + bulkAccountSummary(session) +
+  session.pendingQuantity = 1;
+  const addedLine = "🌾 *" + product.code + "*" + (quantity > 1 ? " × *" + quantity + "*" : "") +
+    "\n   " + product.description + "\n   *" + money(unitPrice * quantity) + "*";
+  await send(jid, "✅ Agregado:\n" + addedLine + "\n\n" + bulkAccountSummary(session) +
     "\n\n¿Deseas cerrar la cuenta? Responde *sí* para cerrarla o *no* para seguir agregando.");
 }
 
@@ -3126,6 +3131,7 @@ async function handleOpenBulkAccountMessage(jid, text) {
   if (/^(?:si|s)$/.test(t)) { await closeBulkAccount(jid, "manual"); return true; }
   if (/^(?:no|seguir|continua|continuar)$/.test(t)) {
     session.pendingMatches = null;
+    session.pendingQuantity = 1;
     await send(jid, "👌 Seguimos. Envía el siguiente código o descripción.");
     return true;
   }
@@ -3145,7 +3151,7 @@ async function handleOpenBulkAccountMessage(jid, text) {
       await send(jid, "❌ No pude elegir una sola opción. Responde con el número de la lista, el código exacto o una descripción que identifique un solo producto.");
       return true;
     }
-    await addProductToBulkAccount(jid, session, chosen);
+    await addProductToBulkAccount(jid, session, chosen, session.pendingQuantity || 1);
     return true;
   }
   const matches = await findProducts(text);
