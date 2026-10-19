@@ -47,7 +47,8 @@ const {
   initAuthCreds,
   BufferJSON,
   proto,
-  Browsers
+  Browsers,
+  downloadContentFromMessage
 } = require("@whiskeysockets/baileys");
 const { MongoClient } = require("mongodb");
 const pino = require("pino");
