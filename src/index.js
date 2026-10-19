@@ -3285,13 +3285,31 @@ function menuBultos() {
   return [
     "🌾 *MENÚ DE BULTOS Y PRECIOS*",
     "",
-    "• *listap* — guarda o actualiza una lista de productos. Usa una línea por producto:",
-    "  BC25K Becerra Crecimiento 25 Kilos $245.00",
-    "  CAGO25K Caballo el 7 leguas Golden 25 Kilos $305.00",
+    "• *listap* guarda o actualiza una lista de productos. Usa una línea por producto:",
     "",
-    "• *precio CC25K* — busca por código o descripción, aceptando fragmentos y errores de escritura.",
-    "• *cuenta* — abre una cuenta temporal por máximo 10 minutos. Cada producto consultado se suma una vez.",
+    "  BC25K Becerra Crecimiento 25 Kilos $245.00",
+    "",
+    "• *precio CC25K* busca por código o descripción",
+    "",
+    "• *cuenta* abre una cuenta temporal",
+    "",
     "• *cerrarcuenta* — cierra la cuenta y muestra el total.",
+    "",
+    "Después de agregar un producto, responde *sí* para cerrar o *no* para seguir.",
+    "",
+    "━━━━━━━━━━━━━━━━━━",
+    "",
+    "🌾 *MENÚ DE CELIA*",
+    "",
+    "• *listap celiat* guarda o actualiza la lista de productos de Celia. Usa una línea por producto:",
+    "",
+    "  BC25K Becerra Crecimiento 25 Kilos $245.00",
+    "",
+    "• *precio celia CC25K* busca por código o descripción en la lista de Celia",
+    "",
+    "• *celiat* abre una cuenta temporal de Celia",
+    "",
+    "• *cerrarceliat* — cierra la cuenta de Celia y muestra el total.",
     "",
     "Después de agregar un producto, responde *sí* para cerrar o *no* para seguir."
   ].join("\n");
@@ -3411,6 +3429,10 @@ async function handleMessage(msg) {
   }
   if (isPrivateChat && /^!?ver\s+lista\s*$/i.test(plainText)) {
     await showProductList(jid, "main");
+    return;
+  }
+  if (isPrivateChat && /^!?precio\s+celia(?:\s|$)/i.test(plainText)) {
+    await handlePrice(jid, plainText.replace(/^\s*!?precio\s+celia\s*/i, ""), "celia");
     return;
   }
   if (isPrivateChat && /^!?precio(?:\s|$)/i.test(plainText)) {
