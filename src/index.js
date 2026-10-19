@@ -3115,7 +3115,7 @@ async function openBulkAccount(jid) {
 
 async function closeBulkAccount(jid, reason = "manual") {
   const session = bulkAccounts.get(jid);
-  if (!session) { await send(jid, "ℹ️ No tienes una cuenta temporal abierta."); return; }
+  if (!session) { await send(jid, "ℹ️ No tienes una cuenta abierta."); return; }
   clearTimeout(session.timer);
   bulkAccounts.delete(jid);
   await send(jid, (reason === "manual" ? "🔒 *CUENTA CERRADA*" : "⏰ *CUENTA CERRADA POR TIEMPO*") + "\n" + bulkAccountSummary(session));
@@ -3127,8 +3127,8 @@ async function addProductToBulkAccount(jid, session, product, quantity = 1) {
   session.items.push({ code: product.code, description: product.description, unitPrice, quantity, price: unitPrice * quantity });
   session.pendingMatches = null;
   session.pendingQuantity = 1;
-  const addedLine = "🌾 *" + product.code + "*" + (quantity > 1 ? " × *" + quantity + "*" : "") +
-    "\n   " + product.description + "\n   *" + money(unitPrice * quantity) + "*";
+  const addedLine = "🌾 " + product.description + "\n" +
+    (quantity > 1 ? "   " + quantity + " × " + money(unitPrice) + " = *" + money(unitPrice * quantity) + "*" : "   *" + money(unitPrice) + "*");
   await send(jid, "✅ Agregado:\n" + addedLine + "\n\n" + bulkAccountSummary(session) +
     "\n\n¿Deseas cerrar la cuenta? Responde *sí* para cerrarla o *no* para seguir agregando.");
 }
