@@ -3149,12 +3149,13 @@ async function closeBulkAccount(jid, reason = "manual", catalog = "main") {
   await send(jid, (reason === "manual" ? "🔒 *CUENTA CERRADA*" : "⏰ *CUENTA CERRADA POR TIEMPO*") + "\n" + bulkAccountSummary(session));
 }
 
-async function addProductToBulkAccount(jid, session, product, quantity = 1) {
+async function addProductToBulkAccount(jid, session, product, quantity = 1, options = {}) {
   quantity = Math.max(1, Math.floor(Number(quantity) || 1));
   const unitPrice = Number(product.price || 0);
   session.items.push({ code: product.code, description: product.description, unitPrice, quantity, price: unitPrice * quantity });
   session.pendingMatches = null;
   session.pendingQuantity = 1;
+  if (options.silent) return;
   const addedProductKey = norm(product.code) + "|" + norm(product.description) + "|" + unitPrice;
   const groupedProductKeys = [...new Set(session.items.map(item =>
     norm(item.code) + "|" + norm(item.description) + "|" + Number(item.unitPrice ?? item.price ?? 0)
@@ -3162,6 +3163,105 @@ async function addProductToBulkAccount(jid, session, product, quantity = 1) {
   const addedNumber = groupedProductKeys.indexOf(addedProductKey) + 1;
   await send(jid, "✅ Producto agregado al renglón *#" + addedNumber + "*.\n\n" + bulkAccountSummary(session) +
     "\n\n¿Deseas cerrar la cuenta? Responde *sí*");
+}
+
+async function processAudioProductQueue(jid, session) {
+  while (session.audioQueue && session.audioQueue.length) {
+    const item = session.audioQueue.shift();
+    const query = String(item.query || "").trim();
+    const quantity = Math.max(1, Math.floor(Number(item.quantity) || 1));
+    const matches = query ? await findProducts(query, session.catalog) : [];
+    if (!matches.length) {
+      await send(jid, "🎙️ No encontré una coincidencia para *" + (query || "un producto del audio") +
+        "*. Continúo con el siguiente producto; puedes agregar este manualmente después.");
+      continue;
+    }
+    if (matches.length === 1) {
+      await addProductToBulkAccount(jid, session, matches[0], quantity, { silent: true });
+      continue;
+    }
+    session.pendingMatches = matches.slice(0, 10);
+    session.pendingQuantity = quantity;
+    session.audioPending = true;
+    session.audioCurrentQuery = query;
+    await send(jid, "🎙️ *REVISIÓN DE PRODUCTOS DEL AUDIO*\n" +
+      "Producto pendiente: *" + query + "* (" + quantity + " unidades).\n" +
+      "Encontré varias coincidencias. Responde con el número del producto que quieres agregar:\n\n" +
+      session.pendingMatches.map((p, i) => productLine(p, i)).join("\n\n") +
+      "\n\nCuando elijas, revisaré el siguiente producto del audio.");
+    return;
+  }
+  session.audioPending = false;
+  session.audioCurrentQuery = null;
+  await send(jid, "🎙️ *AUDIO PROCESADO*\n\n" + bulkAccountSummary(session) +
+    "\n\n¿Deseas agregar más productos? Responde *no* para seguir o *sí* para cerrar la cuenta.");
+}
+
+async function parseAudioProductList(transcript, defaultCatalog) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error("Falta configurar OPENAI_API_KEY en las variables de entorno de Render.");
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { "Authorization": "Bearer " + apiKey, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: process.env.AUDIO_PARSER_MODEL || "gpt-4o-mini",
+      temperature: 0,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: "Convierte una transcripción en español mexicano de una lista hablada de productos para una cuenta de bultos a JSON. Devuelve exclusivamente un objeto JSON con la propiedad items, arreglo de {quantity, query}. quantity debe ser entero positivo. query debe contener solo el nombre o descripción del producto, sin cantidad ni conectores. Conserva el orden hablado, no inventes productos y no combines productos distintos. Si no puedes identificar un producto, conserva una consulta textual corta. No incluyas el nombre de la cuenta/catálogo como producto." },
+        { role: "user", content: "Catálogo: " + defaultCatalog + "\nTranscripción: " + transcript }
+      ]
+    })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.error?.message || "No se pudo interpretar la lista del audio.");
+  const parsed = JSON.parse(data?.choices?.[0]?.message?.content || "{}");
+  if (!Array.isArray(parsed.items)) throw new Error("No pude identificar la lista de productos en el audio.");
+  return parsed.items.map(item => ({
+    quantity: Math.max(1, Math.floor(Number(item.quantity) || 1)),
+    query: String(item.query || "").trim()
+  })).filter(item => item.query).slice(0, 40);
+}
+
+function unwrapWhatsAppMessage(message) {
+  let current = message;
+  while (current && (current.ephemeralMessage || current.viewOnceMessage || current.viewOnceMessageV2 || current.documentWithCaptionMessage)) {
+    current = current.ephemeralMessage?.message || current.viewOnceMessage?.message ||
+      current.viewOnceMessageV2?.message || current.documentWithCaptionMessage?.message;
+  }
+  return current || {};
+}
+
+async function transcribeWhatsAppAudio(message) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error("Falta configurar OPENAI_API_KEY en las variables de entorno de Render.");
+  const content = unwrapWhatsAppMessage(message);
+  const audio = content.audioMessage;
+  if (!audio) return null;
+  const stream = await downloadContentFromMessage(audio, "audio");
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  const buffer = Buffer.concat(chunks);
+  if (!buffer.length) throw new Error("El audio llegó vacío.");
+  if (buffer.length > 25 * 1024 * 1024) throw new Error("El audio supera el límite de 25 MB.");
+  const mime = String(audio.mimetype || "audio/ogg").split(";")[0].toLowerCase();
+  const extension = mime.includes("webm") ? "webm" : mime.includes("mp4") ? "m4a" :
+    mime.includes("mpeg") || mime.includes("mp3") ? "mp3" : mime.includes("wav") ? "wav" :
+    mime.includes("ogg") ? "ogg" : "bin";
+  const form = new FormData();
+  form.append("file", new Blob([buffer], { type: mime }), "whatsapp-audio." + extension);
+  form.append("model", process.env.AUDIO_TRANSCRIPTION_MODEL || "gpt-4o-mini-transcribe");
+  form.append("language", "es");
+  const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST",
+    headers: { "Authorization": "Bearer " + apiKey },
+    body: form
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.error?.message || "No se pudo transcribir el audio.");
+  const transcript = String(data.text || "").trim();
+  if (!transcript) throw new Error("No pude reconocer palabras en el audio.");
+  return transcript;
 }
 
 async function handleOpenBulkAccountMessage(jid, text, catalog = "main") {
