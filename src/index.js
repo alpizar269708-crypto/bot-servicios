@@ -3366,8 +3366,20 @@ async function handleMessage(msg) {
     await send(jid, menuBultos());
     return;
   }
+  if (isPrivateChat && /^!?listap\s+celiat(?:\s|$)/i.test(plainText)) {
+    await handleListap(jid, plainText, "celia");
+    return;
+  }
   if (isPrivateChat && /^!?listap(?:\s|$)/i.test(plainText)) {
-    await handleListap(jid, plainText);
+    await handleListap(jid, plainText, "main");
+    return;
+  }
+  if (isPrivateChat && /^!?ver\s+celia\s*$/i.test(plainText)) {
+    await showProductList(jid, "celia");
+    return;
+  }
+  if (isPrivateChat && /^!?ver\s+lista\s*$/i.test(plainText)) {
+    await showProductList(jid, "main");
     return;
   }
   if (isPrivateChat && /^!?precio(?:\s|$)/i.test(plainText)) {
@@ -3375,14 +3387,25 @@ async function handleMessage(msg) {
     return;
   }
   if (isPrivateChat && /^!?cuenta\s*$/i.test(plainText)) {
-    await openBulkAccount(jid);
+    await openBulkAccount(jid, "main");
+    return;
+  }
+  if (isPrivateChat && /^!?celiat\s*$/i.test(plainText)) {
+    await openBulkAccount(jid, "celia");
+    return;
+  }
+  if (isPrivateChat && /^!?cerrarceliat\s*$/i.test(plainText)) {
+    await closeBulkAccount(jid, "manual", "celia");
     return;
   }
   if (isPrivateChat && /^!?cerrarcuenta\s*$/i.test(plainText)) {
-    await closeBulkAccount(jid, "manual");
+    await closeBulkAccount(jid, "manual", "main");
     return;
   }
-  if (isPrivateChat && await handleOpenBulkAccountMessage(jid, plainText)) {
+  if (isPrivateChat && await handleOpenBulkAccountMessage(jid, plainText, "main")) {
+    return;
+  }
+  if (isPrivateChat && await handleOpenBulkAccountMessage(jid, plainText, "celia")) {
     return;
   }
 
