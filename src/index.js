@@ -3154,12 +3154,7 @@ async function addProductToBulkAccount(jid, session, product, quantity = 1) {
   session.items.push({ code: product.code, description: product.description, unitPrice, quantity, price: unitPrice * quantity });
   session.pendingMatches = null;
   session.pendingQuantity = 1;
-  const addedProductKey = norm(product.code) + "|" + norm(product.description) + "|" + unitPrice;
-  const groupedProductKeys = [...new Set(session.items.map(item =>
-    norm(item.code) + "|" + norm(item.description) + "|" + Number(item.unitPrice ?? item.price ?? 0)
-  ))];
-  const addedNumber = groupedProductKeys.indexOf(addedProductKey) + 1;
-  await send(jid, "✅ Producto agregado al renglón *#" + addedNumber + "*.\n\n" + bulkAccountSummary(session) +
+  await send(jid, "✅ Producto agregado\n\n" + bulkAccountSummary(session) +
     "\n\n¿Deseas cerrar la cuenta? Responde *sí*");
 }
 
