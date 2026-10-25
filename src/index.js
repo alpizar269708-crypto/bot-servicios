@@ -2581,61 +2581,48 @@ async function transferServices(name, serviceIds, jid) {
 
 async function paymentNameMatches(name) {
   const c = await collections();
-  const query = norm(name);
+  const query = norm(name).trim();
   if (!query) return [];
 
-  // Primero buscamos coincidencias directas o por inicio del nombre.
-  const escaped = query.replace(/[.*+?^()|[\]\\]/g, "\\$&");
-  const regex = new RegExp("^" + escaped + "(?:\\s|$)", "i");
-
-  const directPeople = await c.people.find({
-    normalizedName: regex
-  }).sort({ normalizedName: 1 }).limit(20).toArray();
-
-  const directCandidates = [];
-  for (const p of directPeople) {
-    const pending = await c.services.findOne({
-      personId: p._id,
-      status: "pending"
-    });
-    if (pending) directCandidates.push(p);
-  }
-
-  if (directCandidates.length) return directCandidates;
-
-  // Si no coincide exactamente, buscamos errores pequeños de escritura.
-  // Ej.: "ofilia" -> "odilia", "mariaa" -> "maria".
   const people = await c.people.find({}).sort({ normalizedName: 1 }).limit(500).toArray();
-  const fuzzyCandidates = [];
+  const queryWords = query.split(/\s+/).filter(Boolean);
+  const candidates = [];
 
   for (const p of people) {
-    const normalized = norm(p.normalizedName || p.name);
+    const normalized = norm(p.normalizedName || p.name).trim();
     if (!normalized) continue;
 
-    const distance = editDistance(query, normalized);
-    const maxDistance =
-      query.length >= 8 ? 2 :
-      query.length >= 5 ? 1 :
-      0;
+    const pending = await c.services.findOne({ personId: p._id, status: "pending" });
+    if (!pending) continue;
 
-    if (distance > maxDistance) continue;
+    // Fragmentos del nombre y errores de hasta dos letras se aceptan.
+    // Si aparecen varias personas posibles, el flujo existente pregunta cuál.
+    const nameWords = normalized.split(/\s+/).filter(Boolean);
+    const directMatch = normalized.includes(query) || query.includes(normalized);
+    const wordMatches = queryWords.every(qw =>
+      nameWords.some(nw => {
+        if (nw.includes(qw) || qw.includes(nw)) return true;
+        const maxDistance = qw.length >= 5 ? 2 : qw.length >= 4 ? 1 : 0;
+        return maxDistance > 0 && editDistance(qw, nw) <= maxDistance;
+      })
+    );
 
-    const pending = await c.services.findOne({
-      personId: p._id,
-      status: "pending"
-    });
-
-    if (pending) {
-      fuzzyCandidates.push({ person: p, distance });
+    if (directMatch || wordMatches) {
+      candidates.push({
+        person: p,
+        score: directMatch ? 0 : 1,
+        distance: editDistance(query, normalized)
+      });
     }
   }
 
-  fuzzyCandidates.sort((a, b) =>
+  candidates.sort((a, b) =>
+    a.score - b.score ||
     a.distance - b.distance ||
     norm(a.person.name).localeCompare(norm(b.person.name), "es")
   );
 
-  return fuzzyCandidates.slice(0, 20).map(x => x.person);
+  return candidates.slice(0, 20).map(x => x.person);
 }
 function formatServiceDate(date) {
   return new Date(date).toLocaleDateString("es-MX", {
@@ -5282,19 +5269,6 @@ async function handleMessage(msg) {
     }
 
     const matchedPerson = nameMatches[0];
-
-    if (norm(matchedPerson.name) !== norm(name)) {
-      await savePendingAction(jid, {
-        type: "name_confirm",
-        queryName: name,
-        personName: matchedPerson.name
-      });
-
-      await send(jid,
-        "❓ No encontré *" + name + "*.\n¿Es *" + matchedPerson.name + "*?"
-      );
-      return;
-    }
 
     const pending = await pendingServicesForPerson(matchedPerson.name);
     if (!pending.ok) {
