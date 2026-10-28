@@ -402,10 +402,12 @@ function fuzzyPhrase(words, acceptedPhrases) {
 
 function isPaymentWord(word) {
   const w = norm(word);
-  // Los números nunca deben interpretarse como comandos de pago.
+  // Los números y artículos/nombres cortos nunca deben interpretarse
+  // por similitud como comandos de pago: "La ley 35" es un servicio.
   if (!/[a-záéíóúñ]/i.test(w)) return false;
-  if (w === "p") return true;
-  return fuzzyWord(w, ["pa", "pag", "pago", "pagado", "pagar", "paf"], 1);
+  if (w === "p" || w === "pa") return true;
+  if (w.length < 3) return false;
+  return fuzzyWord(w, ["pag", "pago", "pagado", "pagar", "paf"], 1);
 }
 
 function isTransferWord(word) {
@@ -1580,6 +1582,31 @@ async function handleServiceUserMessage(msg, serviceUser) {
       serviceUserLabel(serviceUser)
     );
     return true;
+  }
+
+  // También acepta "Nombre del servicio 35" como alta directa.
+  // Evita que artículos como "La" se confundan con abreviaturas de pago.
+  if (/\s+\$?\d+(?:[.,]\d{1,2})?$/.test(text.trim())) {
+    const parsed = serviceUserNameFromArgs(text, Infinity);
+    if (parsed) {
+      await addService(parsed.name, parsed.amount, jid, false, serviceUser);
+
+      await send(jid,
+        "✅ *Servicio registrado*\n\n" +
+        "👤 " + parsed.name + "\n" +
+        "💵 " + money(parsed.amount)
+      );
+
+      const summary = await servicesSummary();
+      await sendServiceGroupNotice(
+        "🧾 *SERVICIO " + summary.rows.length + "*\n" +
+        "👤 " + parsed.name + "\n" +
+        "💵 " + money(parsed.amount) + "\n\n" +
+        "💰 Total: *" + money(summary.accountTotal) + "*\n" +
+        serviceUserLabel(serviceUser)
+      );
+      return true;
+    }
   }
 
   // También acepta directamente: "50 Maria la del barrio" como alta de servicio.
