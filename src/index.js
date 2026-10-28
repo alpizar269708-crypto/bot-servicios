@@ -892,7 +892,7 @@ function serviceUserLabel(user) {
   return "(" + label + ")";
 }
 
-function serviceUserNameFromArgs(text) {
+function serviceUserNameFromArgs(text, maxWords = 4) {
   let t = String(text || "").trim().replace(/^!/, "").trim();
   const a = amountFrom(t);
   if (!a) return null;
@@ -900,7 +900,7 @@ function serviceUserNameFromArgs(text) {
   const name = cleanName(t, a.raw).trim();
   const words = name.split(/\s+/).filter(Boolean);
 
-  if (!name || words.length > 4) return null;
+  if (!name || words.length > maxWords) return null;
 
   return { amount: a.amount, name, words };
 }
@@ -1382,7 +1382,7 @@ async function handleServiceUserMessage(msg, serviceUser) {
   }
 
   if (first === "servicio" || first === "registrarservicio") {
-    const parsed = serviceUserNameFromArgs(parts.slice(1).join(" "));
+    const parsed = serviceUserNameFromArgs(parts.slice(1).join(" "), Infinity);
     if (!parsed) {
       await send(jid, "❌ Usa: *servicio 50 Maria la del barrio*\nEl nombre puede tener hasta 4 palabras.");
       return true;
@@ -1584,7 +1584,7 @@ async function handleServiceUserMessage(msg, serviceUser) {
 
   // También acepta directamente: "50 Maria la del barrio" como alta de servicio.
   if (/^\$?\d+(?:[.,]\d{1,2})?\s+/.test(text.trim())) {
-    const parsed = serviceUserNameFromArgs(text);
+    const parsed = serviceUserNameFromArgs(text, Infinity);
     if (parsed) {
       await addService(parsed.name, parsed.amount, jid, false, serviceUser);
 
