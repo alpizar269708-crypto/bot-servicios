@@ -5814,7 +5814,7 @@ async function handleMessage(msg) {
     const looksLikeCommand =
       fuzzyWord(firstWord, ["retiro", "retirar", "ret", "r"], 1) ||
       fuzzyWord(firstWord, ["transferencia", "transfer", "transf", "trans"], 2) ||
-      fuzzyWord(firstWord, ["p", "pa", "pag", "pago", "pagado", "pagar", "paf"], 1);
+      isPaymentWord(firstWord);
 
     if (looksLikeCommand) return;
     const name = cleanName(raw, a.raw);
