@@ -1764,6 +1764,7 @@ async function finishPortability(query, jid) {
       name: x.name,
       normalizedName: normalizeStoredName(x.name),
       phone: x.keep,
+      emailSuffix: x.emailSuffix || "",
       createdAt: new Date(),
       createdBy: jid,
       source: "portafin"
