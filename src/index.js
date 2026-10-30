@@ -1742,6 +1742,11 @@ async function deleteTelRecord(id) {
   return { ok: true, doc: row };
 }
 
+async function allPortabilityRecords() {
+  const { portability } = await collections();
+  return portability.find({}).sort({ createdAt: 1, _id: 1 }).toArray();
+}
+
 async function finishPortability(query, jid) {
   const rows = await findPortability(query);
   if (!rows.length) return { ok: false, count: 0, reason: "not_found" };
@@ -1754,7 +1759,6 @@ async function finishPortability(query, jid) {
       name: x.name,
       normalizedName: normalizeStoredName(x.name),
       phone: x.keep,
-      emailSuffix: x.emailSuffix || "",
       createdAt: new Date(),
       createdBy: jid,
       source: "portafin"
@@ -1765,6 +1769,27 @@ async function finishPortability(query, jid) {
 
   await c.portability.deleteMany({ _id: { $in: rows.map(x => x._id) } });
   return { ok: true, count: saved.length, records: saved };
+}
+
+async function finishPortabilityById(id, jid) {
+  const c = await collections();
+  const row = await c.portability.findOne({ _id: id });
+  if (!row) return { ok: false, reason: "not_found" };
+
+  // Solo se conserva el nombre y el número definitivo. El IMEI,
+  // el número temporal y cualquier dato auxiliar no pasan a tel_records.
+  const doc = {
+    name: row.name,
+    normalizedName: normalizeStoredName(row.name),
+    phone: row.keep,
+    createdAt: new Date(),
+    createdBy: jid,
+    source: "portafin"
+  };
+
+  await c.telRecords.insertOne(doc);
+  await c.portability.deleteOne({ _id: row._id });
+  return { ok: true, count: 1, records: [doc], removedTemporary: row.temporary };
 }
 
 async function saveTelRecordsMassive(raw, jid) {
@@ -4183,7 +4208,8 @@ async function handleMessage(msg) {
         "🗑️ *4*  eliminartel\n" +
         "📦 *5*  guardartelmasivo\n" +
         "🔄 *6*  portabilidad\n" +
-        "✅ *7*  portafin"
+        "📋 *7*  verporta\n" +
+        "✅ *8*  portafin"
       );
       return;
     }
@@ -4194,10 +4220,11 @@ async function handleMessage(msg) {
         "1. Guardartel nombre 10dígitos 2dígitos(opcional)\n" +
         "2. Vertel nombre\n" +
         "3. Portabilidad nombre IMEI(15) temporal(10) conservar(10) 2dígitos(opcional)\n" +
-        "4. Portafin nombre\n" +
-        "5. Guardartelmasivo + lista\n" +
-        "6. Vertodos\n" +
-        "7. Eliminartel número | nombre | teléfono"
+        "4. Verporta — muestra las portabilidades pendientes\n" +
+        "5. Portafin número — finaliza una portabilidad de la lista\n" +
+        "6. Guardartelmasivo + lista\n" +
+        "7. Vertodos\n" +
+        "8. Eliminartel número | nombre | teléfono"
       );
       return;
     }
@@ -4255,6 +4282,35 @@ async function handleMessage(msg) {
       return;
     }
 
+    if (directCommand === "verporta") {
+      const rows = await allPortabilityRecords();
+      if (!rows.length) {
+        await clearPendingAction(jid);
+        await send(jid, "📭 *PORTABILIDADES PENDIENTES*\n\nNo hay portabilidades registradas.");
+        return;
+      }
+
+      const body = rows.map((x, i) =>
+        (i + 1) + ". 👤 *" + x.name + "*\n" +
+        "📱 Temporal: " + formatTel(x.temporary) + "\n" +
+        "🔢 Conserva: " + formatTel(x.keep)
+      ).join("\n\n");
+
+      const sent = await send(jid,
+        "📋 *PORTABILIDADES PENDIENTES*\n\n" +
+        body +
+        "\n\nResponde a este mensaje con *portafin número* para finalizar una.\n" +
+        "Ejemplo: *portafin 8*"
+      );
+
+      await savePendingAction(jid, {
+        type: "portability_select",
+        recordIds: rows.map(x => x._id),
+        listMessageId: sent?.key?.id || null
+      });
+      return;
+    }
+
     if (directCommand === "portabilidad") {
       const result = await savePortability(directParts.slice(1).join(" "), jid);
       if (!result.ok) {
@@ -4274,9 +4330,53 @@ async function handleMessage(msg) {
     if (directCommand === "portafin") {
       const query = directParts.slice(1).join(" ").trim();
       if (!query) {
-        await send(jid, "❌ Usa: Portafin nombre");
+        await send(jid, "❌ Usa: Portafin número (respondiendo a *verporta*) o Portafin nombre");
         return;
       }
+
+      // Si se escribe un número, se toma de la lista exacta mostrada por verporta.
+      // El snapshot dura 5 minutos y queda asociado al mensaje al que se responde.
+      if (/^\\d{1,6}$/.test(query)) {
+        const pending = await getPendingAction(jid);
+        if (!pending || pending.type !== "portability_select") {
+          await send(jid, "⏳ Primero escribe *verporta* y responde a esa lista con *portafin número*.");
+          return;
+        }
+
+        const quotedId = msg.message?.extendedTextMessage?.contextInfo?.stanzaId ||
+          msg.message?.imageMessage?.contextInfo?.stanzaId ||
+          msg.message?.videoMessage?.contextInfo?.stanzaId || null;
+        if (quotedId && pending.listMessageId && quotedId !== pending.listMessageId) {
+          await send(jid, "❌ Responde al mensaje de *verporta* para usar los números de esa lista.");
+          return;
+        }
+
+        const index = Number(query);
+        const selectedId = pending.recordIds?.[index - 1];
+        if (!selectedId) {
+          await send(jid, "❌ No existe la portabilidad #" + index + " en la lista mostrada. Escribe *verporta* para actualizarla.");
+          return;
+        }
+
+        const result = await finishPortabilityById(selectedId, jid);
+        await clearPendingAction(jid);
+        if (!result.ok) {
+          await send(jid, "ℹ️ Esa portabilidad ya no está pendiente. Escribe *verporta* para actualizar la lista.");
+          return;
+        }
+
+        const saved = result.records[0];
+        await send(jid,
+          "✅ *PORTABILIDAD FINALIZADA*\n\n" +
+          "👤 *" + saved.name + "*\n" +
+          "📱 Teléfono guardado: " + formatTel(saved.phone) + "\n" +
+          "🗑️ Se eliminó el número temporal: " + formatTel(result.removedTemporary) + "\n" +
+          "📋 La solicitud salió de la lista de portabilidades."
+        );
+        return;
+      }
+
+      // Se conserva el modo anterior: finalizar buscando por nombre.
       const result = await finishPortability(query, jid);
       if (!result.ok) {
         await send(jid, "ℹ️ No encontré una portabilidad para *" + query + "*.");
@@ -4285,8 +4385,7 @@ async function handleMessage(msg) {
       const body = result.records.map((x, i) =>
         (result.records.length > 1 ? (i + 1) + ". " : "") +
         "👤 *" + x.name + "*\n" +
-        "📱 " + formatTel(x.phone) +
-        (x.emailSuffix ? "  ✉️ .." + x.emailSuffix : "")
+        "📱 " + formatTel(x.phone)
       ).join("\n\n");
       await send(jid, "✅ *PORTABILIDAD FINALIZADA*\n\n" + body);
       return;
