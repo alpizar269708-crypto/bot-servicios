@@ -4336,7 +4336,7 @@ async function handleMessage(msg) {
 
       // Si se escribe un número, se toma de la lista exacta mostrada por verporta.
       // El snapshot dura 5 minutos y queda asociado al mensaje al que se responde.
-      if (/^\\d{1,6}$/.test(query)) {
+      if (/^\d{1,6}$/.test(query)) {
         const pending = await getPendingAction(jid);
         if (!pending || pending.type !== "portability_select") {
           await send(jid, "⏳ Primero escribe *verporta* y responde a esa lista con *portafin número*.");
