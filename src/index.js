@@ -1654,9 +1654,14 @@ function splitNameAndPhoneArgs(args) {
 
   const phone = String(parts[phoneIndex]).replace(/\D/g, "");
   let before = parts.slice(0, phoneIndex);
+  const after = parts.slice(phoneIndex + 1);
   let emailSuffix = "";
 
-  if (before.length && /^\d{2}$/.test(before[before.length - 1])) {
+  // Formato principal: nombre teléfono 2 dígitos.
+  // También acepta el formato anterior: nombre 2 dígitos teléfono.
+  if (after.length && /^\d{2}$/.test(after[0])) {
+    emailSuffix = after[0];
+  } else if (before.length && /^\d{2}$/.test(before[before.length - 1])) {
     emailSuffix = before.pop();
   }
 
@@ -1782,6 +1787,7 @@ async function finishPortabilityById(id, jid) {
     name: row.name,
     normalizedName: normalizeStoredName(row.name),
     phone: row.keep,
+    emailSuffix: row.emailSuffix || "",
     createdAt: new Date(),
     createdBy: jid,
     source: "portafin"
@@ -1812,9 +1818,12 @@ async function saveTelRecordsMassive(raw, jid) {
 
     const phone = String(parts[phoneIndex]).replace(/\D/g, "");
     let before = parts.slice(0, phoneIndex);
+    const after = parts.slice(phoneIndex + 1);
     let emailSuffix = "";
 
-    if (before.length && /^\d{2}$/.test(before[before.length - 1])) {
+    if (after.length && /^\d{2}$/.test(after[0])) {
+      emailSuffix = after[0];
+    } else if (before.length && /^\d{2}$/.test(before[before.length - 1])) {
       emailSuffix = before.pop();
     }
 
@@ -4292,8 +4301,10 @@ async function handleMessage(msg) {
 
       const body = rows.map((x, i) =>
         (i + 1) + ". 👤 *" + x.name + "*\n" +
-        "📱 Temporal: " + formatTel(x.temporary) + "\n" +
-        "🔢 Conserva: " + formatTel(x.keep)
+        "🆔 IMEI: " + x.imei + "\n" +
+        "📱 Teléfono temporal: " + formatTel(x.temporary) + "\n" +
+        "🔢 Teléfono a conservar: " + formatTel(x.keep) +
+        (x.emailSuffix ? "\n✉️ Correo: .." + x.emailSuffix : "\n✉️ Correo: No registrado")
       ).join("\n\n");
 
       const sent = await send(jid,
@@ -4320,9 +4331,10 @@ async function handleMessage(msg) {
       await send(jid,
         "✅ *PORTABILIDAD GUARDADA*\n" +
         "👤 " + result.doc.name + "\n" +
+        "🆔 IMEI: " + result.doc.imei + "\n" +
         "📱 Temporal: " + result.doc.temporary + "\n" +
         "🔢 Conserva: " + result.doc.keep +
-        (result.doc.emailSuffix ? "\n✉️ .." + result.doc.emailSuffix : "")
+        (result.doc.emailSuffix ? "\n✉️ Correo: .." + result.doc.emailSuffix : "\n✉️ Correo: No registrado")
       );
       return;
     }
