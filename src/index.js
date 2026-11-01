@@ -5528,6 +5528,61 @@ async function handleMessage(msg) {
       .join(" ")
       .trim();
 
+    // Al responder directamente a un mensaje "🧾 SERVICIO N / 👤 Nombre / 💵 $Importe",
+    // toma el nombre y el importe de la línea 💵. No uses amountFrom sobre todo
+    // el mensaje porque puede interpretar el número de SERVICIO N como importe.
+    if (!args && quoted && /SERVICIO/i.test(quoted)) {
+      const quotedName = quotedServiceName(quoted);
+      const quotedAmountMatch = quoted.match(/^\\s*💵\\s*\\$?\\s*([\\d,]+(?:\\.\\d{1,2})?)\\s*$/im);
+      const quotedAmount = quotedAmountMatch
+        ? Number(quotedAmountMatch[1].replace(/,/g, ""))
+        : NaN;
+
+      if (quotedName && Number.isFinite(quotedAmount) && quotedAmount > 0) {
+        const pending = await pendingServicesForPerson(quotedName);
+        if (!pending.ok || !pending.rows.length) {
+          await send(jid, "ℹ️ *" + quotedName + "* ya no tiene deudas pendientes.");
+          return;
+        }
+
+        const matching = pending.rows.filter(row =>
+          Number(row.amount || 0) === quotedAmount
+        );
+
+        if (!matching.length) {
+          await send(jid,
+            "ℹ️ No encontré una deuda pendiente de *" + quotedName +
+            "* por " + money(quotedAmount) + ". No se registró la transferencia."
+          );
+          return;
+        }
+
+        // Si hay importes repetidos, liquida solo el más antiguo; nunca todas
+        // las deudas de la persona por responder a un único mensaje de servicio.
+        const result = await transferServices(
+          pending.person.name,
+          [matching[0]._id],
+          jid
+        );
+
+        if (!result.ok) {
+          await send(jid, "ℹ️ Ese servicio ya no está pendiente.");
+          return;
+        }
+
+        const transferSummary = await servicesSummary();
+        await send(jid,
+          "🔄 *TRANSFERENCIA REGISTRADA*\\n" +
+          "👤 " + result.person.name + "\\n" +
+          "💵 " + money(result.total) + "\\n" +
+          "✅ El servicio fue quitado de la lista de deudores.\\n\\n" +
+          "🧮 Ajuste: -" + money(result.total) + "\\n" +
+          "💰 Total actual: *" + money(transferSummary.accountTotal) + "*"
+        );
+        return;
+      }
+    }
+
     if (!args && quoted) args = quoted.replace(/^!/, "").trim();
 
     const a = amountFrom(args);
