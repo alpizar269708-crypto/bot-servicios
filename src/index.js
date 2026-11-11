@@ -5713,8 +5713,11 @@ async function handleMessage(msg) {
     const s = await servicesSummary();
     const c = await collections();
 
-    if (a.amount > s.netTotal) {
-      await send(jid, "❌ El retiro supera el total disponible de " + money(s.netTotal) + ".");
+    // El retiro se valida contra el total de la cuenta, que incluye
+    // servicios pagados y pendientes. Los pendientes solo son informativos:
+    // se descuentan del total únicamente cuando se registra una transferencia.
+    if (a.amount > s.accountTotal) {
+      await send(jid, "❌ El retiro supera el total de la cuenta de " + money(s.accountTotal) + ".");
       return;
     }
 
@@ -5731,7 +5734,7 @@ async function handleMessage(msg) {
       "💸 *RETIRO*\n" +
       "💵 " + money(a.amount) + "\n" +
       "📅 " + now.toLocaleString("es-MX", { timeZone: "America/Mexico_City" }) + "\n" +
-      "💰 Queda: " + money(updated.netTotal)
+      "💰 Queda: " + money(updated.accountTotal)
     );
     return;
   }
