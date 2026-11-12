@@ -2172,10 +2172,10 @@ async function addService(name, amount, jid, transfer, recordedBy = null) {
   }
 
   if (transfer) {
-    // Si existe un servicio pendiente de esta persona por el mismo importe,
-    // la transferencia paga ese servicio en lugar de crear una deuda nueva.
+    // Toda transferencia que coincida con una deuda pendiente debe liquidarla
+    // mediante la misma función central usada por los demás comandos.
+    // Así el servicio cambia a status "transfer" y desaparece de DEUDORES.
     const pendingService = await c.services.findOne({
-      accountNumber: account.number,
       personId: p._id,
       amount: Number(amount),
       transferId: { $exists: false },
@@ -2184,11 +2184,14 @@ async function addService(name, amount, jid, transfer, recordedBy = null) {
       sort: { createdAt: 1 }
     });
 
-    // Si el servicio ya fue marcado como pagado y después se registra
-    // que ese pago fue por transferencia, lo enlazamos sin duplicarlo
-    // ni convertirlo nuevamente en deuda.
-    const paidService = pendingService ? null : await c.services.findOne({
-      accountNumber: account.number,
+    if (pendingService) {
+      const result = await transferServices(p.name, [pendingService._id], jid);
+      if (result.ok) return "transfer_paid";
+    }
+
+    // Si el servicio ya estaba pagado, enlazamos el movimiento sin
+    // convertirlo otra vez en deuda ni duplicar el servicio.
+    const paidService = await c.services.findOne({
       personId: p._id,
       amount: Number(amount),
       transferId: { $exists: false },
@@ -2197,36 +2200,26 @@ async function addService(name, amount, jid, transfer, recordedBy = null) {
       sort: { createdAt: 1 }
     });
 
-    const linkedService = pendingService || paidService;
-
     const transferDoc = {
       ...doc,
       status: "recorded"
     };
 
-    if (linkedService) {
-      const update = {
-        $set: {
-          transferId: linkedService._id
-        }
-      };
-
-      // Si seguía pendiente, la transferencia la deja pagada por transferencia.
-      // Si ya estaba pagada, conserva "paid" y solo enlaza el movimiento.
-      if (linkedService.status === "pending") {
-        update.$set.status = "transfer";
-      }
+    if (paidService) {
+      const transferResult = await c.transfers.insertOne({
+        ...transferDoc,
+        serviceId: paidService._id
+      });
 
       await c.services.updateOne(
-        { _id: linkedService._id },
-        update
+        { _id: paidService._id, personId: p._id, status: "paid" },
+        { $set: { transferId: transferResult.insertedId } }
       );
-
-      transferDoc.serviceId = linkedService._id;
+      return "transfer_paid";
     }
 
     await c.transfers.insertOne(transferDoc);
-    return linkedService ? "transfer_paid" : "transfer";
+    return "transfer";
   }
 
   await c.services.insertOne({ ...doc, status: "pending" });
