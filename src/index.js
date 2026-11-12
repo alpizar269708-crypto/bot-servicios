@@ -2235,7 +2235,24 @@ async function reconcileTransfers() {
   }).sort({ createdAt: 1 }).toArray();
 
   for (const transfer of transfers) {
-    if (transfer.serviceId) continue;
+    if (transfer.serviceId) {
+      // Repara registros antiguos o incompletos: si la transferencia ya está
+      // enlazada a un servicio que aún figura pendiente, debe salir de DEUDORES.
+      await c.services.updateOne(
+        {
+          _id: transfer.serviceId,
+          personId: transfer.personId,
+          status: "pending"
+        },
+        {
+          $set: {
+            status: "transfer",
+            transferId: transfer._id
+          }
+        }
+      );
+      continue;
+    }
 
     // Primero intenta enlazar una deuda pendiente; si el servicio ya fue
     // marcado como pagado, también puede enlazarse sin cambiar su estado.
