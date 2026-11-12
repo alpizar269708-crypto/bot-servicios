@@ -5526,7 +5526,7 @@ async function handleMessage(msg) {
     // el mensaje porque puede interpretar el número de SERVICIO N como importe.
     if (!args && quoted && /SERVICIO/i.test(quoted)) {
       const quotedName = quotedServiceName(quoted);
-      const quotedAmountMatch = quoted.match(/^\\s*💵\\s*\\$?\\s*([\\d,]+(?:\\.\\d{1,2})?)\\s*$/im);
+      const quotedAmountMatch = quoted.match(/^\s*💵\s*\$?\s*([\d,]+(?:\.\d{1,2})?)\s*$/im);
       const quotedAmount = quotedAmountMatch
         ? Number(quotedAmountMatch[1].replace(/,/g, ""))
         : NaN;
