@@ -1394,9 +1394,36 @@ async function handleServiceUserMessage(msg, serviceUser) {
       return true;
     }
 
-    const type = await addService(parsed.name, parsed.amount, jid, false, serviceUser);
+    const creditUse = await applyCustomerCredit(parsed.name, parsed.amount, jid, serviceUser);
+    let type = "service";
+    if (!creditUse) {
+      type = await addService(parsed.name, parsed.amount, jid, false, serviceUser);
+    }
     if (type !== "service") {
       await send(jid, "❌ No pude registrar el servicio.");
+      return true;
+    }
+
+    const summary = await servicesSummary();
+    const serviceCount = summary.rows.length;
+    if (creditUse) {
+      await send(jid,
+        "💳 *CRÉDITO APLICADO*\n\n" +
+        "👤 " + creditUse.person.name + "\n" +
+        "🧾 Servicio: " + money(creditUse.requested) + "\n" +
+        "➖ Descontado del crédito: " + money(creditUse.used) + "\n" +
+        "💳 Saldo restante: *" + money(creditUse.balance) + "*" +
+        (creditUse.remainder > 0 ? "\n⏳ Deuda pendiente: *" + money(creditUse.remainder) + "*" : "")
+      );
+      await sendServiceGroupNotice(
+        "💳 *SERVICIO CUBIERTO CON CRÉDITO*\n" +
+        "👤 " + creditUse.person.name + "\n" +
+        "🧾 Servicio: " + money(creditUse.requested) + "\n" +
+        "➖ Crédito usado: " + money(creditUse.used) + "\n" +
+        (creditUse.remainder > 0 ? "⏳ Deuda pendiente: " + money(creditUse.remainder) + "\n" : "") +
+        "💰 Total: *" + money(summary.accountTotal) + "*\n" +
+        serviceUserLabel(serviceUser)
+      );
       return true;
     }
 
@@ -1405,9 +1432,6 @@ async function handleServiceUserMessage(msg, serviceUser) {
       "👤 " + parsed.name + "\n" +
       "💵 " + money(parsed.amount)
     );
-
-    const summary = await servicesSummary();
-    const serviceCount = summary.rows.length;
 
     await sendServiceGroupNotice(
       "🧾 *SERVICIO " + serviceCount + "*\n" +
@@ -2412,10 +2436,11 @@ async function servicesSummary() {
   // Todos los servicios cuentan para la suma bruta de control,
   // aunque estén pendientes, pagados o pagados por transferencia.
   // La transferencia se resta UNA sola vez al calcular el efectivo disponible.
-  const serviceTotal = rows.reduce(
-    (s, x) => s + Number(x.amount || 0),
-    0
-  );
+  // Los servicios cubiertos con crédito ya fueron pagados al dejar el anticipo;
+  // no vuelven a incrementar el total cuando se consume ese saldo.
+  const serviceTotal = rows
+    .filter(x => x.status !== "credit")
+    .reduce((s, x) => s + Number(x.amount || 0), 0);
   const transferRows = await transfers.find({
     accountNumber: account.number
   }).sort({ createdAt: 1 }).toArray();
@@ -4170,6 +4195,7 @@ async function handleMessage(msg) {
       "transferencia",
       "transferencia_numero",
       "deshacer_transferencia",
+      "credito",
       "ajustelista",
       "ajustetransferenciacaja",
       "todopagado",
