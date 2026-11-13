@@ -1,0 +1,24 @@
+name: Validar sintaxis
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Revisar sintaxis de JavaScript
+        run: |
+          node --check src/index.js
+          node --check src/mongoAuth.js
+      - name: Validar package.json
+        run: node -e "JSON.parse(require('fs').readFileSync('package.json', 'utf8'))"
