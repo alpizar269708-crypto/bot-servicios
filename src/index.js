@@ -707,7 +707,7 @@ function quotedServiceName(text) {
   const a = amountFrom(t);
   if (a) {
     const name = cleanName(t, a.raw);
-    return /[\\p{L}]/u.test(name) ? name : "";
+    return /[\p{L}]/u.test(name) ? name : "";
   }
 
   return t.replace(/^!/, "").trim();
