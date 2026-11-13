@@ -444,6 +444,11 @@ function selectionNumberFromText(text) {
   const raw = norm(text);
   if (!raw) return null;
 
+  // WhatsApp puede devolver el número de lista copiado junto con la opción:
+  // "1.  2" significa elegir la opción 2, no un nombre ni un importe.
+  const copiedListChoice = raw.match(/^\d+\.\s*(\d+)$/);
+  if (copiedListChoice) return Number(copiedListChoice[1]);
+
   if (/^\d+$/.test(raw)) return Number(raw);
 
   const explicit = raw.match(/^(?:la|el|numero|num|número)\s+(\d+)$/i);
@@ -5785,11 +5790,11 @@ async function handleMessage(msg) {
 
         const transferSummary = await servicesSummary();
         await send(jid,
-          "🔄 *TRANSFERENCIA REGISTRADA*\\n" +
-          "👤 " + result.person.name + "\\n" +
-          "💵 " + money(result.total) + "\\n" +
-          "✅ El servicio fue quitado de la lista de deudores.\\n\\n" +
-          "🧮 Ajuste: -" + money(result.total) + "\\n" +
+          "🔄 *TRANSFERENCIA REGISTRADA*\n" +
+          "👤 " + result.person.name + "\n" +
+          "💵 " + money(result.total) + "\n" +
+          "✅ El servicio fue quitado de la lista de deudores.\n\n" +
+          "🧮 Ajuste: -" + money(result.total) + "\n" +
           "💰 Total actual: *" + money(transferSummary.accountTotal) + "*"
         );
         return;
