@@ -690,17 +690,17 @@ function quotedServiceName(text) {
 
   // Reconoce filas de DEUDORES numeradas: "1. 👤 Kevin".
   // El índice nunca debe confundirse con el nombre de la persona.
-  const numberedBotName = t.match(/^\\s*\\d+[.)]\\s*👤\\s*(?:Usuario\\s*:\\s*)?(.+?)\\s*$/im);
+  const numberedBotName = t.match(/^\s*\d+[.)]\s*👤\s*(?:Usuario\s*:\s*)?(.+?)\s*$/im);
   if (numberedBotName) {
     const name = numberedBotName[1].replace(/[*_]/g, "").trim();
-    return /[\\p{L}]/u.test(name) ? name : "";
+    return /[\p{L}]/u.test(name) ? name : "";
   }
 
   // Mensajes del propio bot, por ejemplo: "👤 Kevin".
-  const botName = t.match(/^\\s*👤\\s*(?:Usuario\\s*:\\s*)?(.+?)\\s*$/im);
+  const botName = t.match(/^\s*👤\s*(?:Usuario\s*:\s*)?(.+?)\s*$/im);
   if (botName) {
     const name = botName[1].replace(/[*_]/g, "").trim();
-    return /[\\p{L}]/u.test(name) ? name : "";
+    return /[\p{L}]/u.test(name) ? name : "";
   }
 
   // Mensajes humanos tipo "Persona 250" o "250 Persona".
