@@ -559,10 +559,10 @@ function commandOf(text) {
 
   // Permite marcar un deudor de la lista como transferencia por número:
   // "2 transferencia" o "transferencia 2".
-  if (/^\\d+$/.test(first) && words.length === 2 && /^(transferencia|transfer|transf)$/.test(words[1])) {
+  if (/^\d+$/.test(first) && words.length === 2 && /^(transferencia|transfer|transf)$/.test(words[1])) {
     return "transferencia_numero";
   }
-  if (/^(transferencia|transfer|transf)$/.test(first) && words.length === 2 && /^\\d+$/.test(words[1])) {
+  if (/^(transferencia|transfer|transf)$/.test(first) && words.length === 2 && /^\d+$/.test(words[1])) {
     return "transferencia_numero";
   }
 
@@ -2563,7 +2563,7 @@ async function undoTransfer(name) {
   // Si el usuario escribió "Mauricio P", prueba también quitando la última
   // inicial, porque P es una abreviatura del comando "pago", no parte del nombre.
   if (!p) {
-    const parts = normalized.split(/\\s+/).filter(Boolean);
+    const parts = normalized.split(/\s+/).filter(Boolean);
     if (parts.length > 1 && parts[parts.length - 1] === "p") {
       const base = parts.slice(0, -1).join(" ");
       p = await c.people.findOne({ normalizedName: base });
@@ -4217,7 +4217,7 @@ async function handleMessage(msg) {
     let args = text.trim();
     if (args.startsWith(PREFIX)) args = args.slice(PREFIX.length).trim();
 
-    const parts = args.split(/\\s+/).filter(Boolean);
+    const parts = args.split(/\s+/).filter(Boolean);
     if (parts.length && fuzzyWord(parts[0], ["deshacer", "deshace", "deshacerlo"], 2)) parts.shift();
 
     let mode = command === "deshacer_transferencia" ? "transferencia" : "pago";
@@ -5540,7 +5540,7 @@ async function handleMessage(msg) {
     const requestedDate = parseDateInput(args);
 
     // Formas naturales: "pagar Mari numero 2" / "pagar Mari la 2".
-    const indexMatch = norm(args).match(/^(?:p|pa|pag|pago|pagado|pagar)?\\s*(.+?)\\s+(?:la|el|numero|num|número)\\s+(\\d+)$/i);
+    const indexMatch = norm(args).match(/^(?:p|pa|pag|pago|pagado|pagar)?\s*(.+?)\s+(?:la|el|numero|num|número)\s+(\d+)$/i);
     const requestedIndex = indexMatch ? Number(indexMatch[2]) : null;
     if (indexMatch) name = indexMatch[1].trim();
 
@@ -5730,6 +5730,10 @@ async function handleMessage(msg) {
     // el mensaje porque puede interpretar el número de SERVICIO N como importe.
     if (!args && quoted && /SERVICIO/i.test(quoted)) {
       const quotedName = quotedServiceName(quoted);
+        if (!quotedName || !/[\p{L}]/u.test(quotedName)) {
+          await send(jid, "❌ No pude identificar el nombre del cliente en el mensaje citado. No se registró ninguna transferencia.");
+          return;
+        }
       const quotedAmountMatch = quoted.match(/^\s*💵\s*\$?\s*([\d,]+(?:\.\d{1,2})?)\s*$/im);
       const quotedAmount = quotedAmountMatch
         ? Number(quotedAmountMatch[1].replace(/,/g, ""))
