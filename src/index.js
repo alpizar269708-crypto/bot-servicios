@@ -518,6 +518,9 @@ function commandOf(text) {
   const first = words[0];
   const joined = words.join(" ");
 
+  // Crédito de clientes: "credito Ageo 1000".
+  if (/^credito$/i.test(first)) return "credito";
+
   // Permite escribir el nombre primero y "transferencia" al final:
   // "Juan Pérez transferencia" o "Juan Pérez transferencia 250".
   // Debe resolverse antes de los comandos por palabras sueltas.
@@ -750,7 +753,8 @@ async function collections() {
     portability: db.collection(COLLECTION + "_portability"),
     serviceUsers: db.collection(COLLECTION + "_arem_users"),
     serviceUserBlocks: db.collection(COLLECTION + "_service_user_blocks"),
-    products: db.collection(COLLECTION + "_products")
+    products: db.collection(COLLECTION + "_products"),
+    credits: db.collection(COLLECTION + "_credits")
   };
 }
 
@@ -2150,6 +2154,116 @@ async function person(name, jid) {
   return p;
 }
 
+async function customerCreditBalance(personId) {
+  const { credits } = await collections();
+  const rows = await credits.find({ personId }).toArray();
+  return rows.reduce((balance, row) => {
+    const amount = Number(row.amount || 0);
+    return balance + (row.type === "deposit" ? amount : row.type === "use" ? -amount : 0);
+  }, 0);
+}
+
+async function addCustomerCredit(name, amount, jid) {
+  const account = await ensureAccount();
+  const p = await person(name, jid);
+  const { credits } = await collections();
+  const value = Number(amount);
+
+  if (!Number.isFinite(value) || value <= 0) {
+    return { ok: false, reason: "invalid_amount" };
+  }
+
+  const now = new Date();
+  await credits.insertOne({
+    accountNumber: account.number,
+    personId: p._id,
+    personName: p.name,
+    type: "deposit",
+    amount: value,
+    createdAt: now,
+    jid: jid || null
+  });
+
+  return {
+    ok: true,
+    person: p,
+    added: value,
+    balance: await customerCreditBalance(p._id)
+  };
+}
+
+// Aplica el saldo adelantado a un servicio sin volver a sumar ese dinero
+// a la caja. Solo la parte que exceda el crédito queda como deuda pendiente.
+async function applyCustomerCredit(name, amount, jid, recordedBy = null) {
+  const account = await ensureAccount();
+  const p = await person(name, jid);
+  const c = await collections();
+  const value = Number(amount);
+  const balance = Math.max(0, await customerCreditBalance(p._id));
+
+  if (balance <= 0) return null;
+
+  const used = Math.min(balance, value);
+  const remainder = Math.max(0, value - used);
+  const now = new Date();
+
+  if (used > 0) {
+    await c.credits.insertOne({
+      accountNumber: account.number,
+      personId: p._id,
+      personName: p.name,
+      type: "use",
+      amount: used,
+      createdAt: now,
+      jid: jid || null
+    });
+
+    const creditService = {
+      accountNumber: account.number,
+      personId: p._id,
+      personName: p.name,
+      amount: used,
+      status: "credit",
+      createdAt: now
+    };
+    if (recordedBy?.phone) {
+      creditService.recordedBy = {
+        phone: recordedBy.phone,
+        name: recordedBy.name || recordedBy.folio || "Usuario",
+        folio: recordedBy.folio || recordedBy.name || "Usuario"
+      };
+    }
+    await c.services.insertOne(creditService);
+  }
+
+  if (remainder > 0) {
+    const debtService = {
+      accountNumber: account.number,
+      personId: p._id,
+      personName: p.name,
+      amount: remainder,
+      status: "pending",
+      createdAt: now
+    };
+    if (recordedBy?.phone) {
+      debtService.recordedBy = {
+        phone: recordedBy.phone,
+        name: recordedBy.name || recordedBy.folio || "Usuario",
+        folio: recordedBy.folio || recordedBy.name || "Usuario"
+      };
+    }
+    await c.services.insertOne(debtService);
+  }
+
+  return {
+    person: p,
+    requested: value,
+    used,
+    remainder,
+    balance: await customerCreditBalance(p._id)
+  };
+}
+
 async function addService(name, amount, jid, transfer, recordedBy = null) {
   const account = await ensureAccount();
   const p = await person(name, jid);
@@ -2314,7 +2428,16 @@ async function servicesSummary() {
 
   // TOTAL CONTABLE = inicio + todos los servicios.
   // Esto se conserva para corte y control, incluyendo pendientes.
-  const total = Number(account.initialAmount || 0) + serviceTotal;
+  const creditRows = await c.credits.find({
+    accountNumber: account.number,
+    type: "deposit"
+  }).toArray();
+  const creditDepositTotal = creditRows.reduce(
+    (sum, row) => sum + Number(row.amount || 0),
+    0
+  );
+
+  const total = Number(account.initialAmount || 0) + serviceTotal + creditDepositTotal;
 
   const pending = rows.filter(x => x.status === "pending");
   const paid = rows.filter(x => x.status === "paid");
@@ -2326,9 +2449,9 @@ async function servicesSummary() {
   // Por eso NO debemos restar transferencias de un total que ya excluye
   // esos servicios; hacerlo provocaría un cálculo incorrecto.
   const paidTotal = paid.reduce((s, x) => s + Number(x.amount || 0), 0);
-  const netTotal = Number(account.initialAmount || 0) + paidTotal - withdrawnTotal;
+  const netTotal = Number(account.initialAmount || 0) + paidTotal + creditDepositTotal - withdrawnTotal;
 
-  // TOTAL GENERAL = suma total - transferencias - retiros.
+  // TOTAL GENERAL = servicios + depósitos de crédito - transferencias - retiros.
   // Pendientes y pagados son solo informativos y NO participan en este cálculo.
   // Este es el importe que deben usar "total", "corte" y los mensajes de alta de servicio.
   const accountTotal = total - transferTotal - withdrawnTotal;
@@ -2341,6 +2464,7 @@ async function servicesSummary() {
     serviceTotal,
     transferRows,
     transferTotal,
+    creditDepositTotal,
     withdrawnTotal,
     netTotal,
     withdrawalRows,
@@ -3290,6 +3414,11 @@ function menuServicios() {
     "",
     "🔄 *TRANSFERENCIA*",
     "Registra el pago por transferencia.",
+    "",
+    "💳 *CRÉDITO DE CLIENTES*",
+    "credito Ageo 1000 — registra dinero que el cliente deja por adelantado; aumenta la caja.",
+    "Cuando después registres Ageo 250, se descuenta de su crédito y no vuelve a sumarse a caja.",
+    "Si el servicio supera su saldo, solo la diferencia queda como deuda.",
     "",
     "💸 *RETIRO*",
     "Registra dinero que se entrega o se deposita a Beto.",
@@ -5341,7 +5470,7 @@ async function handleMessage(msg) {
           const registeredBy = x.recordedBy?.name || x.recordedBy?.folio;
           const marker = registeredBy ? " (" + registeredBy + ")" : "";
           return (i + 1) + ". " + x.personName + " — " + money(x.amount) +
-            (x.status === "paid" ? " ✅" : " ⏳") + marker;
+            (x.status === "credit" ? " 💳 CRÉDITO" : (x.status === "paid" ? " ✅" : " ⏳")) + marker;
         }).join("\n")
       : "No hay servicios registrados.";
 
@@ -5523,6 +5652,34 @@ async function handleMessage(msg) {
       "💵 " + money(result.total) + "\n\n" +
       "🧮 Ajuste: -" + money(result.total) + "\n" +
       "💰 Total actual: *" + money(transferSummary.accountTotal) + "*"
+    );
+    return;
+  }
+
+  if (command === "credito") {
+    let args = text.trim().replace(/^!/, "").trim();
+    args = args.replace(/^credito\s*/i, "").trim();
+    const a = amountFrom(args);
+    const name = a ? cleanName(args, a.raw) : "";
+
+    if (!a || !name || a.amount <= 0) {
+      await send(jid, "❌ Usa: *credito Ageo 1000* para agregar $1,000 al saldo a favor del cliente.");
+      return;
+    }
+
+    const result = await addCustomerCredit(name, a.amount, jid);
+    if (!result.ok) {
+      await send(jid, "❌ El importe del crédito no es válido.");
+      return;
+    }
+
+    const summary = await servicesSummary();
+    await send(jid,
+      "💳 *CRÉDITO AGREGADO*\n" +
+      "👤 " + result.person.name + "\n" +
+      "➕ Depositado en efectivo: *" + money(result.added) + "*\n" +
+      "💳 Saldo a favor: *" + money(result.balance) + "*\n\n" +
+      "💰 Total de caja: *" + money(summary.accountTotal) + "*"
     );
     return;
   }
@@ -6000,6 +6157,30 @@ async function handleMessage(msg) {
     const name = cleanName(raw, a.raw);
     if (name.length >= 2) {
       const transfer = /\b(transferencia|transfer|transf)\b/i.test(raw);
+
+      if (!transfer) {
+        const creditUse = await applyCustomerCredit(name, a.amount, jid);
+        if (creditUse) {
+          const summary = await servicesSummary();
+          const statusText = creditUse.remainder > 0
+            ? "⚠️ Crédito agotado; la diferencia quedó como deuda pendiente."
+            : "✅ Servicio cubierto con el crédito que dejó el cliente.";
+          await send(jid,
+            "💳 *CRÉDITO APLICADO*\n" +
+            "👤 " + creditUse.person.name + "\n" +
+            "🧾 Importe del servicio: " + money(creditUse.requested) + "\n" +
+            "➖ Descontado del crédito: " + money(creditUse.used) + "\n" +
+            "💳 Saldo restante: *" + money(creditUse.balance) + "*\n" +
+            (creditUse.remainder > 0
+              ? "⏳ Deuda pendiente: *" + money(creditUse.remainder) + "*\n"
+              : "") +
+            statusText + "\n\n" +
+            "💰 Total de caja: *" + money(summary.accountTotal) + "*"
+          );
+          return;
+        }
+      }
+
       const type = await addService(name, a.amount, jid, transfer);
 
       if (type === "transfer") {
