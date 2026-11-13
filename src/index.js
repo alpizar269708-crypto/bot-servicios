@@ -1511,6 +1511,7 @@ async function handleServiceUserMessage(msg, serviceUser) {
     if (rows.length > 1) {
       await savePendingAction(jid, {
         type: "service_user_pay_select",
+        requesterJid: messageSenderJid,
         personName: matchedPerson.name,
         rows
       });
@@ -3637,6 +3638,7 @@ async function handleMessage(msg) {
 
   const jid = msg.key.remoteJid;
   if (!jid) return;
+  const messageSenderJid = msg.key.participant || jid;
 
   const isPrivateChat = !jid.endsWith("@g.us");
 
@@ -3884,7 +3886,7 @@ async function handleMessage(msg) {
   // Si el bot está esperando que el usuario elija una deuda, una respuesta
   // numérica o por importe se procesa antes que cualquier otro comando.
   const pendingAction = await getPendingAction(jid);
-  if (pendingAction && !isAdjustListText(text) && !/PAGO\s+REGISTRADO/i.test(quoted || "") && text.trim()) {
+  if (pendingAction && (!pendingAction.requesterJid || pendingAction.requesterJid === messageSenderJid) && !isAdjustListText(text) && !/PAGO\s+REGISTRADO/i.test(quoted || "") && text.trim()) {
     const choiceText = text.trim();
 
     if (pendingAction.type === "service_user_debt_select") {
@@ -3990,6 +3992,7 @@ async function handleMessage(msg) {
 
         await savePendingAction(jid, {
           type: "pay_select",
+          requesterJid: messageSenderJid,
           personName: pending.person.name,
           serviceIds: pending.rows.map(x => x._id),
           rows: pending.rows
@@ -5652,6 +5655,7 @@ async function handleMessage(msg) {
 
     await savePendingAction(jid, {
       type: "pay_select",
+      requesterJid: messageSenderJid,
       personName: pending.person.name,
       serviceIds: rows.map(x => x._id),
       rows
