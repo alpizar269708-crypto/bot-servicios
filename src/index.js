@@ -496,6 +496,15 @@ function selectionNumbersFromText(text) {
   return [...new Set(numbers)];
 }
 
+function paymentSelectionNumbersFromText(text) {
+  const raw = norm(text).trim();
+  // En esta pregunta, "1. 2", "1 2" y "1 y 2" seleccionan ambas opciones.
+  // Solo acepta respuestas formadas por números y separadores, para no
+  // confundir nombres, importes u otros mensajes con selecciones.
+  if (!/^\d+\.?(?:(?:\s+|\s*(?:,|;|y)\s*)\d+\.?)*$/i.test(raw)) return [];
+  return [...new Set((raw.match(/\d+/g) || []).map(Number))];
+}
+
 function isCancelText(text) {
   return fuzzyWord(norm(text), ["cancelar", "cancela", "cancel", "salir", "no"], 1);
 }
@@ -4115,29 +4124,30 @@ async function handleMessage(msg) {
     }
 
     if (pendingAction.type === "pay_select") {
-      let selected = null;
-      if (selectedNumber && pendingAction.serviceIds[selectedNumber - 1]) {
-        selected = pendingAction.serviceIds[selectedNumber - 1];
-      } else if (selectedAmount) {
-        const matches = pendingAction.rows.filter(x => Number(x.amount) === Number(selectedAmount.amount));
-        if (matches.length === 1) selected = matches[0]._id;
-      } else if (selectedDate) {
-        const matches = pendingAction.rows.filter(x => sameLocalDate(x.createdAt, selectedDate));
-        if (matches.length === 1) selected = matches[0]._id;
+      const selectedNumbers = paymentSelectionNumbersFromText(choiceText);
+      let selectedIds = [];
+
+      if (selectedNumbers.length) {
+        const invalidNumbers = selectedNumbers.filter(n => n < 1 || n > pendingAction.serviceIds.length);
+        if (invalidNumbers.length) {
+          await send(jid, "❌ Uno de los números no corresponde a una deuda de *" + pendingAction.personName + "*.");
+          return;
+        }
+        selectedIds = selectedNumbers.map(n => pendingAction.serviceIds[n - 1]);
+      } else {
+        let selected = null;
+        if (selectedAmount) {
+          const matches = pendingAction.rows.filter(x => Number(x.amount) === Number(selectedAmount.amount));
+          if (matches.length === 1) selected = matches[0]._id;
+        } else if (selectedDate) {
+          const matches = pendingAction.rows.filter(x => sameLocalDate(x.createdAt, selectedDate));
+          if (matches.length === 1) selected = matches[0]._id;
+        }
+        if (selected) selectedIds = [selected];
       }
 
-      // Si el usuario escribió solamente un número, pero ese número no
-      // corresponde a una deuda de la lista, no dejamos que el mensaje
-      // se interprete como otra cosa.
-      if (selectedNumber && !selected) {
-        await send(jid, "❌ Ese número no corresponde a una deuda de *" + pendingAction.personName + "*.");
-        return;
-      }
-
-      if (selected) {
-        const chosen = pendingAction.rows.find(x => String(x._id) === String(selected));
-
-        const result = await payServices(pendingAction.personName, [selected], serviceUser || null);
+      if (selectedIds.length) {
+        const result = await payServices(pendingAction.personName, selectedIds, serviceUser || null);
         await clearPendingAction(jid);
         if (result.ok) {
           await send(jid,
