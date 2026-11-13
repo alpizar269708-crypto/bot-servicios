@@ -2223,10 +2223,14 @@ async function applyCustomerCredit(name, amount, jid, recordedBy = null) {
   const p = await person(name, jid);
   const c = await collections();
   const value = Number(amount);
+  const creditHistory = await c.credits.find({ personId: p._id }).limit(1).toArray();
+
+  // Si nunca tuvo crédito, se conserva el registro normal de servicio.
+  // Si ya manejamos crédito para esta persona pero agotó su saldo,
+  // el nuevo importe se registra explícitamente como deuda.
+  if (!creditHistory.length) return null;
+
   const balance = Math.max(0, await customerCreditBalance(p._id));
-
-  if (balance <= 0) return null;
-
   const used = Math.min(balance, value);
   const remainder = Math.max(0, value - used);
   const now = new Date();
