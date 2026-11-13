@@ -4048,6 +4048,7 @@ async function handleMessage(msg) {
 
         await savePendingAction(jid, {
           type: "pay_select",
+          requesterJid: messageSenderJid,
           personName: pending.person.name,
           serviceIds: pending.rows.map(x => x._id),
           rows: pending.rows
