@@ -6042,9 +6042,9 @@ async function handleMessage(msg) {
           .toArray()
       ]);
 
-      // Si el usuario no registró servicios en este ciclo, se omite
-      // por completo su bloque de control, incluidos los totales en cero.
-      if (!userServices.length) continue;
+      // El control se muestra si registró al menos un servicio o un pago.
+      // Solo se omite cuando no registró ninguno de los dos.
+      if (!userServices.length && !userPayments.length) continue;
 
       const label = String(user.name || user.folio || "Usuario").trim();
 
