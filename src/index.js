@@ -6180,25 +6180,8 @@ async function handleMessage(msg) {
     );
 
     // MENSAJE 3: CORTE
-    const byAmount = new Map();
-    for (const row of s.rows.filter(row => row.status !== "transfer" && !row.transferId)) {
-      const amount = Number(row.amount || 0);
-      byAmount.set(amount, (byAmount.get(amount) || 0) + 1);
-    }
-
-    const serviceLines = [...byAmount.entries()]
-      .sort((a, b) => b[0] - a[0])
-      .map(([amount, count]) =>
-        money(amount) + "*" + count + "=" + money(amount * count)
-      )
-      .join("\n");
-
-    const serviceSection = serviceLines || "Sin servicios normales.";
-
     await send(jid,
       "✂️ *CORTE*\n\n" +
-      "📋 *Servicios:*\n" +
-      serviceSection + "\n\n" +
       "💰 Suma total: *" + money(s.total) + "*\n" +
       "🔄 Transferencias: *" + money(s.transferTotal) + "*\n" +
       "💸 Retiros: *" + money(s.withdrawnTotal) + "*\n" +
