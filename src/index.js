@@ -6042,6 +6042,10 @@ async function handleMessage(msg) {
           .toArray()
       ]);
 
+      // Si el usuario no registró servicios en este ciclo, se omite
+      // por completo su bloque de control, incluidos los totales en cero.
+      if (!userServices.length) continue;
+
       const label = String(user.name || user.folio || "Usuario").trim();
 
       const serviceBody = userServices.length
